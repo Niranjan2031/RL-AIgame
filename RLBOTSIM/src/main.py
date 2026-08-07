@@ -1,10 +1,10 @@
 import pygame
 import os
 import math
+
 from player import Player
 from bullet import Bullet
 from enemy import Enemy
-
 
 
 # =====================================================
@@ -21,8 +21,13 @@ pygame.init()
 WIDTH = 1000
 HEIGHT = 700
 
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("RL SURVIVAL")
+screen = pygame.display.set_mode(
+    (WIDTH, HEIGHT)
+)
+
+pygame.display.set_caption(
+    "RL SURVIVAL"
+)
 
 
 # =====================================================
@@ -60,8 +65,15 @@ clock = pygame.time.Clock()
 # FONTS
 # =====================================================
 
-font = pygame.font.SysFont(None, 36)
-big_font = pygame.font.SysFont(None, 72)
+font = pygame.font.SysFont(
+    None,
+    36
+)
+
+big_font = pygame.font.SysFont(
+    None,
+    72
+)
 
 
 # =====================================================
@@ -92,21 +104,44 @@ game_state = "PLAYING"
 # =====================================================
 
 wave = 1
+
 enemy_count = 5
 
 enemies = []
 
 for i in range(enemy_count):
 
-    enemies.append(Enemy())
+    enemies.append(
+        Enemy()
+    )
 
 
 # =====================================================
 # MELEE SETTINGS
 # =====================================================
 
+# Maximum distance for melee attack
 MELEE_RANGE = 100
-MELEE_DAMAGE = 1
+
+
+# Attack cone in degrees
+#
+# 90 degrees means:
+# 45 degrees left
+# 45 degrees right
+#
+MELEE_ANGLE = 90
+
+
+# Melee cooldown
+#
+# 500 milliseconds = 0.5 seconds
+#
+MELEE_COOLDOWN = 500
+
+
+# Time when last melee attack happened
+last_melee_time = 0
 
 
 # =====================================================
@@ -147,9 +182,57 @@ while running:
                 running = False
 
 
-            # -----------------------------------------
+            # =========================================
+            # WEAPON SWITCHING
+            # =========================================
+
+            # 1 → HANDGUN
+            if (
+                event.key == pygame.K_1
+                and game_state == "PLAYING"
+            ):
+
+                player.set_weapon(
+                    "handgun"
+                )
+
+
+            # 2 → SHOTGUN
+            elif (
+                event.key == pygame.K_2
+                and game_state == "PLAYING"
+            ):
+
+                player.set_weapon(
+                    "shotgun"
+                )
+
+
+            # 3 → RIFLE
+            elif (
+                event.key == pygame.K_3
+                and game_state == "PLAYING"
+            ):
+
+                player.set_weapon(
+                    "rifle"
+                )
+
+
+            # 4 → KNIFE
+            elif (
+                event.key == pygame.K_4
+                and game_state == "PLAYING"
+            ):
+
+                player.set_weapon(
+                    "knife"
+                )
+
+
+            # =========================================
             # R → RELOAD
-            # -----------------------------------------
+            # =========================================
 
             if (
                 event.key == pygame.K_r
@@ -159,90 +242,292 @@ while running:
                 player.reload()
 
 
-            # -----------------------------------------
-            # SPACE → MELEE
-            # -----------------------------------------
+            # =========================================
+            # SPACE → MELEE ATTACK
+            # =========================================
 
             if (
                 event.key == pygame.K_SPACE
                 and game_state == "PLAYING"
             ):
 
-                # Start melee animation
-                melee_started = player.melee_attack()
+                # -------------------------------------
+                # CURRENT TIME
+                # -------------------------------------
 
-                # Only deal damage if melee actually started
-                if melee_started:
+                current_time = (
+                    pygame.time.get_ticks()
+                )
 
-                    player_center_x = (
-                        player.x +
-                        player.width // 2
+
+                # -------------------------------------
+                # CHECK COOLDOWN
+                # -------------------------------------
+
+                if (
+                    current_time -
+                    last_melee_time
+                    >= MELEE_COOLDOWN
+                ):
+
+                    # ---------------------------------
+                    # START MELEE ANIMATION
+                    # ---------------------------------
+
+                    melee_started = (
+                        player.melee_attack()
                     )
 
-                    player_center_y = (
-                        player.y +
-                        player.height // 2
-                    )
 
-                    # Check every enemy
-                    for enemy in enemies:
+                    # Only attack if animation
+                    # successfully started
+                    if melee_started:
 
-                        if not enemy.alive:
-                            continue
+                        # -----------------------------
+                        # UPDATE COOLDOWN
+                        # -----------------------------
 
-                        enemy_center_x = (
-                            enemy.x +
-                            enemy.width // 2
+                        last_melee_time = (
+                            current_time
                         )
 
-                        enemy_center_y = (
-                            enemy.y +
-                            enemy.height // 2
+
+                        # -----------------------------
+                        # PLAYER CENTER
+                        # -----------------------------
+
+                        player_center_x = (
+                            player.x +
+                            player.width // 2
                         )
 
-                        distance = math.sqrt(
-                            (
+                        player_center_y = (
+                            player.y +
+                            player.height // 2
+                        )
+
+
+                        # -----------------------------
+                        # MOUSE POSITION
+                        # -----------------------------
+
+                        mouse_x, mouse_y = (
+                            pygame.mouse.get_pos()
+                        )
+
+
+                        # -----------------------------
+                        # DIRECTION TO MOUSE
+                        # -----------------------------
+
+                        direction_x = (
+                            mouse_x -
+                            player_center_x
+                        )
+
+                        direction_y = (
+                            mouse_y -
+                            player_center_y
+                        )
+
+
+                        # -----------------------------
+                        # PLAYER AIM ANGLE
+                        # -----------------------------
+
+                        player_angle = (
+                            math.degrees(
+                                math.atan2(
+                                    direction_y,
+                                    direction_x
+                                )
+                            )
+                        )
+
+
+                        # -----------------------------
+                        # GET CURRENT WEAPON
+                        # -----------------------------
+
+                        melee_damage = (
+                            player.get_melee_damage()
+                        )
+
+
+                        # -----------------------------
+                        # CHECK ALL ENEMIES
+                        # -----------------------------
+
+                        for enemy in enemies:
+
+                            # Ignore dead enemies
+                            if not enemy.alive:
+
+                                continue
+
+
+                            # -------------------------
+                            # ENEMY CENTER
+                            # -------------------------
+
+                            enemy_center_x = (
+                                enemy.x +
+                                enemy.width // 2
+                            )
+
+                            enemy_center_y = (
+                                enemy.y +
+                                enemy.height // 2
+                            )
+
+
+                            # -------------------------
+                            # DISTANCE
+                            # -------------------------
+
+                            dx = (
                                 enemy_center_x -
                                 player_center_x
-                            ) ** 2
-                            +
-                            (
+                            )
+
+                            dy = (
                                 enemy_center_y -
                                 player_center_y
-                            ) ** 2
-                        )
-
-                        # Enemy is within melee range
-                        if distance <= MELEE_RANGE:
-
-                            enemy.health -= MELEE_DAMAGE
-
-                            print("Melee hit!")
-
-                            # Enemy killed
-                            if enemy.health <= 0:
-
-                                enemy.alive = False
-
-                                score += 10
+                            )
 
 
-        # ---------------------------------------------
+                            distance = math.sqrt(
+                                dx ** 2 +
+                                dy ** 2
+                            )
+
+
+                            # -------------------------
+                            # RANGE CHECK
+                            # -------------------------
+
+                            if (
+                                distance >
+                                MELEE_RANGE
+                            ):
+
+                                continue
+
+
+                            # -------------------------
+                            # ANGLE TO ENEMY
+                            # -------------------------
+
+                            enemy_angle = (
+                                math.degrees(
+                                    math.atan2(
+                                        dy,
+                                        dx
+                                    )
+                                )
+                            )
+
+
+                            # -------------------------
+                            # ANGLE DIFFERENCE
+                            # -------------------------
+
+                            angle_difference = (
+                                enemy_angle -
+                                player_angle
+                            )
+
+
+                            # Keep angle between
+                            # -180 and +180
+
+                            angle_difference = (
+                                angle_difference +
+                                180
+                            ) % 360 - 180
+
+
+                            # -------------------------
+                            # ATTACK DIRECTION CHECK
+                            # -------------------------
+
+                            if (
+                                abs(
+                                    angle_difference
+                                )
+                                <=
+                                MELEE_ANGLE / 2
+                            ):
+
+                                # Enemy is:
+                                #
+                                # 1. Alive
+                                # 2. In range
+                                # 3. In front of player
+                                #
+                                # Therefore hit it.
+
+                                enemy.health -= (
+                                    melee_damage
+                                )
+
+
+                                print(
+                                    f"{player.current_weapon} "
+                                    f"melee hit! "
+                                    f"Damage: "
+                                    f"{melee_damage} | "
+                                    f"Enemy health: "
+                                    f"{enemy.health}"
+                                )
+
+
+                                # ---------------------
+                                # ENEMY KILLED
+                                # ---------------------
+
+                                if (
+                                    enemy.health <= 0
+                                ):
+
+                                    enemy.alive = False
+
+                                    score += 10
+
+
+        # =============================================
         # LEFT MOUSE BUTTON → SHOOT
-        # ---------------------------------------------
+        # =============================================
 
         if (
             game_state == "PLAYING"
-            and event.type == pygame.MOUSEBUTTONDOWN
+            and event.type ==
+            pygame.MOUSEBUTTONDOWN
             and event.button == 1
         ):
 
-            mouse_x, mouse_y = pygame.mouse.get_pos()
+            # -----------------------------------------
+            # MOUSE POSITION
+            # -----------------------------------------
 
-            # Play shooting animation
-            shoot_started = player.shoot()
+            mouse_x, mouse_y = (
+                pygame.mouse.get_pos()
+            )
 
-            # Only create bullet if shooting was allowed
+
+            # -----------------------------------------
+            # TRY TO SHOOT
+            # -----------------------------------------
+
+            shoot_started = (
+                player.shoot()
+            )
+
+
+            # -----------------------------------------
+            # CREATE BULLET
+            # -----------------------------------------
+
             if shoot_started:
 
                 bullets.append(
@@ -276,7 +561,7 @@ while running:
     if game_state == "PLAYING":
 
         # ---------------------------------------------
-        # HEALTH BAR BACKGROUND
+        # PLAYER HEALTH BAR BACKGROUND
         # ---------------------------------------------
 
         pygame.draw.rect(
@@ -292,8 +577,19 @@ while running:
 
 
         # ---------------------------------------------
-        # HEALTH BAR
+        # PLAYER HEALTH BAR
         # ---------------------------------------------
+
+        health_width = (
+            player.health / 30
+        ) * 200
+
+
+        health_width = max(
+            0,
+            health_width
+        )
+
 
         pygame.draw.rect(
             screen,
@@ -301,14 +597,14 @@ while running:
             (
                 20,
                 20,
-                (player.health / 30) * 200,
+                health_width,
                 20
             )
         )
 
 
         # ---------------------------------------------
-        # WAVE
+        # WAVE TEXT
         # ---------------------------------------------
 
         wave_text = font.render(
@@ -324,7 +620,7 @@ while running:
 
 
         # ---------------------------------------------
-        # SCORE
+        # SCORE TEXT
         # ---------------------------------------------
 
         score_text = font.render(
@@ -339,20 +635,79 @@ while running:
         )
 
 
+        # ---------------------------------------------
+        # AMMO
+        # ---------------------------------------------
+
+        # Knife has no ammo system
+
+        if (
+            player.current_weapon !=
+            "knife"
+        ):
+
+            ammo_text = font.render(
+                f"Ammo: {player.ammo} / "
+                f"{player.max_ammo}",
+                True,
+                (255, 255, 255)
+            )
+
+            screen.blit(
+                ammo_text,
+                (20, 110)
+            )
+
+
+        # ---------------------------------------------
+        # CURRENT WEAPON
+        # ---------------------------------------------
+
+        weapon_text = font.render(
+            f"Weapon: "
+            f"{player.current_weapon.upper()}",
+            True,
+            (255, 255, 255)
+        )
+
+        screen.blit(
+            weapon_text,
+            (20, 145)
+        )
+
+
         # =================================================
         # PLAYER
         # =================================================
 
         player.move()
 
+
+        # ---------------------------------------------
+        # CHECK PLAYER HEALTH
+        # ---------------------------------------------
+
         if player.health <= 0:
 
             game_state = "GAME_OVER"
 
 
-        player.draw(screen)
+        # ---------------------------------------------
+        # DRAW PLAYER
+        # ---------------------------------------------
 
-        player.aim(screen)
+        player.draw(
+            screen
+        )
+
+
+        # ---------------------------------------------
+        # AIM LINE
+        # ---------------------------------------------
+
+        player.aim(
+            screen
+        )
 
 
         # =================================================
@@ -361,16 +716,36 @@ while running:
 
         for enemy in enemies:
 
+            # -----------------------------------------
+            # ENEMY MOVEMENT
+            # -----------------------------------------
+
             enemy.move(
                 player,
                 enemies
             )
 
-            if enemy.check_player_collision(player):
 
-                enemy.attack(player)
+            # -----------------------------------------
+            # ENEMY ATTACK
+            # -----------------------------------------
 
-            enemy.draw(screen)
+            if enemy.check_player_collision(
+                player
+            ):
+
+                enemy.attack(
+                    player
+                )
+
+
+            # -----------------------------------------
+            # DRAW ENEMY
+            # -----------------------------------------
+
+            enemy.draw(
+                screen
+            )
 
 
         # =================================================
@@ -379,12 +754,16 @@ while running:
 
         for bullet in bullets[:]:
 
+            # -----------------------------------------
+            # MOVE BULLET
+            # -----------------------------------------
+
             bullet.move()
 
 
-            # ---------------------------------------------
+            # -----------------------------------------
             # BULLET OUTSIDE SCREEN
-            # ---------------------------------------------
+            # -----------------------------------------
 
             if (
                 bullet.x < 0
@@ -393,7 +772,9 @@ while running:
                 or bullet.y > HEIGHT
             ):
 
-                bullets.remove(bullet)
+                bullets.remove(
+                    bullet
+                )
 
                 continue
 
@@ -401,21 +782,53 @@ while running:
             bullet_hit = False
 
 
-            # ---------------------------------------------
+            # -----------------------------------------
+            # GET CURRENT WEAPON DAMAGE
+            # -----------------------------------------
+
+            bullet_damage = (
+                player.get_damage()
+            )
+
+
+            # -----------------------------------------
             # BULLET COLLISION
-            # ---------------------------------------------
+            # -----------------------------------------
 
             for enemy in enemies:
 
                 if (
                     enemy.alive
-                    and enemy.check_collision(bullet)
+                    and enemy.check_collision(
+                        bullet
+                    )
                 ):
 
-                    enemy.health -= 1
+                    # ---------------------------------
+                    # APPLY WEAPON-SPECIFIC DAMAGE
+                    # ---------------------------------
+
+                    enemy.health -= (
+                        bullet_damage
+                    )
 
 
-                    if enemy.health <= 0:
+                    print(
+                        f"{player.current_weapon} "
+                        f"hit! Damage: "
+                        f"{bullet_damage} | "
+                        f"Enemy health: "
+                        f"{enemy.health}"
+                    )
+
+
+                    # ---------------------------------
+                    # ENEMY KILLED
+                    # ---------------------------------
+
+                    if (
+                        enemy.health <= 0
+                    ):
 
                         enemy.alive = False
 
@@ -427,9 +840,15 @@ while running:
                     break
 
 
+            # -----------------------------------------
+            # REMOVE BULLET AFTER HIT
+            # -----------------------------------------
+
             if bullet_hit:
 
-                bullets.remove(bullet)
+                bullets.remove(
+                    bullet
+                )
 
 
         # =================================================
@@ -438,6 +857,11 @@ while running:
 
         alive_enemies = 0
 
+
+        # ---------------------------------------------
+        # COUNT LIVING ENEMIES
+        # ---------------------------------------------
+
         for enemy in enemies:
 
             if enemy.alive:
@@ -445,7 +869,15 @@ while running:
                 alive_enemies += 1
 
 
+        # ---------------------------------------------
+        # ALL ENEMIES DEFEATED
+        # ---------------------------------------------
+
         if alive_enemies == 0:
+
+            # -----------------------------------------
+            # MORE WAVES
+            # -----------------------------------------
 
             if wave < 3:
 
@@ -455,13 +887,27 @@ while running:
 
                 enemies = []
 
-                for i in range(enemy_count):
 
-                    enemies.append(Enemy())
+                # Spawn new enemies
+
+                for i in range(
+                    enemy_count
+                ):
+
+                    enemies.append(
+                        Enemy()
+                    )
+
+
+            # -----------------------------------------
+            # FINAL WAVE COMPLETE
+            # -----------------------------------------
 
             else:
 
-                game_state = "LEVEL_COMPLETE"
+                game_state = (
+                    "LEVEL_COMPLETE"
+                )
 
 
         # =================================================
@@ -470,7 +916,9 @@ while running:
 
         for bullet in bullets:
 
-            bullet.draw(screen)
+            bullet.draw(
+                screen
+            )
 
 
     # =====================================================
@@ -485,11 +933,13 @@ while running:
             (255, 0, 0)
         )
 
+
         score_text = font.render(
             f"Final Score: {score}",
             True,
             (255, 255, 255)
         )
+
 
         exit_text = font.render(
             "Press ESC to Exit",
@@ -497,15 +947,18 @@ while running:
             (255, 255, 255)
         )
 
+
         screen.blit(
             title,
             (300, 220)
         )
 
+
         screen.blit(
             score_text,
             (370, 320)
         )
+
 
         screen.blit(
             exit_text,
@@ -525,11 +978,13 @@ while running:
             (0, 255, 0)
         )
 
+
         score_text = font.render(
             f"Final Score: {score}",
             True,
             (255, 255, 255)
         )
+
 
         exit_text = font.render(
             "Press ESC to Exit",
@@ -537,15 +992,18 @@ while running:
             (255, 255, 255)
         )
 
+
         screen.blit(
             title,
             (220, 220)
         )
 
+
         screen.blit(
             score_text,
             (370, 320)
         )
+
 
         screen.blit(
             exit_text,

@@ -2,6 +2,7 @@ import pygame
 import math
 import random
 import time
+import os
 
 
 class Enemy:
@@ -12,16 +13,35 @@ class Enemy:
         self.x = random.randint(50, 950)
         self.y = random.randint(50, 650)
 
-        self.width = 40
-        self.height = 40
+        self.width = 80
+        self.height = 80
 
-        self.color = (255, 0, 0)
         self.speed = 2
 
         self.alive = True
         self.health = 3
 
-        # Attack properties
+        # ---------------- Load Enemy Sprite ----------------
+
+        current_dir = os.path.dirname(__file__)
+
+        enemy_path = os.path.join(
+            current_dir,
+            "..",
+            "assets",
+            "enemy",
+            "enemy.png"
+        )
+
+        self.image = pygame.image.load(enemy_path).convert_alpha()
+
+        self.image = pygame.transform.scale(
+            self.image,
+            (self.width, self.height)
+        )
+
+        # ---------------- Attack ----------------
+
         self.attack_damage = 1
         self.attack_cooldown = 1.0
         self.last_attack_time = 0
@@ -31,11 +51,10 @@ class Enemy:
         if not self.alive:
             return
 
-        # Enemy body
-        pygame.draw.rect(
-            screen,
-            self.color,
-            (self.x, self.y, self.width, self.height)
+        # Draw enemy sprite
+        screen.blit(
+            self.image,
+            (self.x, self.y)
         )
 
         # Health bar background
@@ -45,7 +64,7 @@ class Enemy:
             (self.x, self.y - 12, self.width, 6)
         )
 
-        # Current health bar
+        # Current health
         pygame.draw.rect(
             screen,
             (0, 255, 0),

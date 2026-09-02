@@ -1,11 +1,12 @@
 import pygame
 import os
 import math
+import pytmx
 
 from player import Player
 from bullet import Bullet
 from enemy import Enemy
-
+from obstacle import Obstacle
 
 # =====================================================
 # INITIALIZE PYGAME
@@ -25,34 +26,35 @@ screen = pygame.display.set_mode(
     (WIDTH, HEIGHT)
 )
 
+# =================================================
+# LOAD TILED MAP
+# =================================================
+
+map_path = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "assets",
+    "maps",
+    "Dungeon1.tmx"
+)
+
+tmx_data = pytmx.load_pygame(map_path)
+walls_layer = tmx_data.get_layer_by_name("Walls")
+
+wall_count = 0
+
+for x, y, image in walls_layer.tiles():
+    wall_count += 1
+
+print("NUMBER OF WALL TILES:", wall_count)
+MAP_WIDTH = tmx_data.width * tmx_data.tilewidth
+MAP_HEIGHT = tmx_data.height * tmx_data.tileheight
+
 pygame.display.set_caption(
     "RL SURVIVAL"
 )
 
-
-# =====================================================
-# BACKGROUND
-# =====================================================
-
-current_dir = os.path.dirname(__file__)
-
-background_path = os.path.join(
-    current_dir,
-    "..",
-    "assets",
-    "background",
-    "backgr1.png"
-)
-
-background = pygame.image.load(
-    background_path
-).convert()
-
-background = pygame.transform.scale(
-    background,
-    (WIDTH, HEIGHT)
-)
-
+obstacles = []
 
 # =====================================================
 # CLOCK
@@ -149,6 +151,99 @@ last_melee_time = 0
 # =====================================================
 
 running = True
+
+def draw_tiled_map(screen, tmx_data):
+
+    # How much bigger each tile should appear
+    tile_scale = 1.638
+
+    # Original map size
+    map_width = tmx_data.width * tmx_data.tilewidth
+    map_height = tmx_data.height * tmx_data.tileheight
+
+    # Create surface for original map
+    map_surface = pygame.Surface(
+        (map_width, map_height),
+        pygame.SRCALPHA
+    )
+
+    # Draw all Tiled layers
+    for layer in tmx_data.visible_layers:
+
+        if hasattr(layer, "tiles"):
+
+            for x, y, image in layer.tiles():
+
+                map_surface.blit(
+                    image,
+                    (
+                        x * tmx_data.tilewidth,
+                        y * tmx_data.tileheight
+                    )
+                )
+
+    # Make the COMPLETE map 2x larger
+    enlarged_width = int(map_width * tile_scale)
+    enlarged_height = int(map_height * tile_scale)
+
+    map_surface = pygame.transform.scale(
+        map_surface,
+        (enlarged_width, enlarged_height)
+    )
+
+    # Center the enlarged map
+    screen_width, screen_height = screen.get_size()
+
+    offset_x = (screen_width - enlarged_width) // 2
+    offset_y = (screen_height - enlarged_height) // 2
+
+    screen.blit(
+        map_surface,
+        (offset_x, offset_y-30)
+    )
+
+
+def load_obstacles(tmx_data):
+
+    tile_scale = 1.638
+
+    map_width = tmx_data.width * tmx_data.tilewidth
+    map_height = tmx_data.height * tmx_data.tileheight
+
+    enlarged_width = int(map_width * tile_scale)
+    enlarged_height = int(map_height * tile_scale)
+
+    screen_width, screen_height = screen.get_size()
+
+    offset_x = (screen_width - enlarged_width) // 2
+    offset_y = (screen_height - enlarged_height) // 2 - 30
+
+    obstacles = []
+
+    # Get our new obstacle Object Layer
+    obstacle_layer = tmx_data.get_layer_by_name("obstacle")
+
+    # Read every rectangle from the layer
+    for obj in obstacle_layer:
+
+        x = offset_x + obj.x * tile_scale
+        y = offset_y + obj.y * tile_scale
+
+        width = obj.width * tile_scale
+        height = obj.height * tile_scale    
+
+        obstacles.append(
+            Obstacle(
+                int(x),
+                int(y),
+                int(width),
+                int(height)
+            )
+        )
+
+    return obstacles
+obstacles = load_obstacles(tmx_data)
+
 
 while running:
 
@@ -530,30 +625,48 @@ while running:
 
             if shoot_started:
 
-                bullets.append(
-                    Bullet(
-                        player.x +
-                        player.width // 2,
+                # Player center
+                center_x = player.x + player.width // 2
+                center_y = player.y + player.height // 2
 
-                        player.y +
-                        player.height // 2,
+                # Direction toward mouse
+                dx = mouse_x - center_x
+                dy = mouse_y - center_y
 
-                        mouse_x,
-                        mouse_y
+                distance = math.sqrt(dx**2 + dy**2)
+
+                if distance != 0:
+
+                    # Normalize direction
+                    direction_x = dx / distance
+                    direction_y = dy / distance
+
+                    # Distance from player center to gun muzzle
+                    muzzle_distance = 35
+
+
+                    # Calculate gun muzzle position
+                    muzzle_x = center_x + direction_x * muzzle_distance
+                    muzzle_y = center_y + direction_y * muzzle_distance
+
+                    bullets.append(
+                        Bullet(
+                            muzzle_x,
+                            muzzle_y,
+                            mouse_x,
+                            mouse_y
+                        )
                     )
-                )
 
 
     # =================================================
     # BACKGROUND
     # =================================================
 
-    screen.blit(
-        background,
-        (0, 0)
-    )
+    draw_tiled_map(screen, tmx_data)
 
-
+    for obstacle in obstacles:
+        obstacle.draw(screen)
     # =================================================
     # PLAYING
     # =================================================
@@ -680,9 +793,9 @@ while running:
         # PLAYER
         # =================================================
 
-        player.move()
+        player.move(obstacles)
 
-
+        
         # ---------------------------------------------
         # CHECK PLAYER HEALTH
         # ---------------------------------------------
@@ -722,7 +835,7 @@ while running:
 
             enemy.move(
                 player,
-                enemies
+                enemies,obstacles
             )
 
 
@@ -737,7 +850,6 @@ while running:
                 enemy.attack(
                     player
                 )
-
 
             # -----------------------------------------
             # DRAW ENEMY
@@ -754,16 +866,55 @@ while running:
 
         for bullet in bullets[:]:
 
-            # -----------------------------------------
-            # MOVE BULLET
-            # -----------------------------------------
+        # -----------------------------------------
+        # MOVE BULLET
+        # -----------------------------------------
 
             bullet.move()
 
 
-            # -----------------------------------------
-            # BULLET OUTSIDE SCREEN
-            # -----------------------------------------
+        # -----------------------------------------
+        # CREATE BULLET RECTANGLE
+        # -----------------------------------------
+
+            bullet_rect = pygame.Rect(
+                int(bullet.x - bullet.radius),
+                int(bullet.y - bullet.radius),
+                bullet.radius * 2,
+                bullet.radius * 2
+            )
+
+
+        # -----------------------------------------
+        # BULLET COLLISION WITH OBSTACLES
+        # -----------------------------------------
+
+            bullet_hit_obstacle = False
+
+            for obstacle in obstacles:
+
+                if bullet_rect.colliderect(
+                    obstacle.rect
+                ):
+
+                    bullet_hit_obstacle = True
+                    break
+
+
+        # -----------------------------------------
+        # REMOVE BULLET IF IT HITS OBSTACLE
+        # -----------------------------------------
+
+            if bullet_hit_obstacle:
+
+                bullets.remove(bullet)
+
+                continue
+
+
+        # -----------------------------------------
+        # BULLET OUTSIDE SCREEN
+        # -----------------------------------------
 
             if (
                 bullet.x < 0
@@ -772,9 +923,7 @@ while running:
                 or bullet.y > HEIGHT
             ):
 
-                bullets.remove(
-                    bullet
-                )
+                bullets.remove(bullet)
 
                 continue
 
@@ -782,18 +931,18 @@ while running:
             bullet_hit = False
 
 
-            # -----------------------------------------
-            # GET CURRENT WEAPON DAMAGE
-            # -----------------------------------------
+        # -----------------------------------------
+        # GET CURRENT WEAPON DAMAGE
+        # -----------------------------------------
 
             bullet_damage = (
                 player.get_damage()
             )
 
 
-            # -----------------------------------------
-            # BULLET COLLISION
-            # -----------------------------------------
+        # -----------------------------------------
+        # BULLET COLLISION WITH ENEMIES
+        # -----------------------------------------
 
             for enemy in enemies:
 
@@ -804,9 +953,9 @@ while running:
                     )
                 ):
 
-                    # ---------------------------------
-                    # APPLY WEAPON-SPECIFIC DAMAGE
-                    # ---------------------------------
+            # ---------------------------------
+            # APPLY DAMAGE
+            # ---------------------------------
 
                     enemy.health -= (
                         bullet_damage
@@ -822,13 +971,11 @@ while running:
                     )
 
 
-                    # ---------------------------------
-                    # ENEMY KILLED
-                    # ---------------------------------
+                # ---------------------------------
+                # ENEMY KILLED
+                # ---------------------------------
 
-                    if (
-                        enemy.health <= 0
-                    ):
+                    if enemy.health <= 0:
 
                         enemy.alive = False
 
@@ -840,15 +987,14 @@ while running:
                     break
 
 
-            # -----------------------------------------
-            # REMOVE BULLET AFTER HIT
-            # -----------------------------------------
+        # -----------------------------------------
+        # REMOVE BULLET AFTER HITTING ENEMY
+        # -----------------------------------------
 
             if bullet_hit:
 
-                bullets.remove(
-                    bullet
-                )
+                bullets.remove(bullet)
+
 
 
         # =================================================

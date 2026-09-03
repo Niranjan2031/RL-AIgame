@@ -5,6 +5,7 @@ import time
 import os
 
 
+
 class Enemy:
 
     def __init__(self):
@@ -13,8 +14,15 @@ class Enemy:
         self.x = random.randint(50, 950)
         self.y = random.randint(50, 650)
 
-        self.width = 80
-        self.height = 80
+        self.width = 40
+        self.height = 40
+
+        self.rect = pygame.Rect(
+        self.x,
+        self.y,
+        self.width,
+        self.height
+        )
 
         self.speed = 2
 
@@ -76,7 +84,7 @@ class Enemy:
             )
         )
 
-    def move(self, player, enemies):
+    def move(self, player, enemies, obstacles=None):
 
         if not self.alive:
             return
@@ -92,31 +100,112 @@ class Enemy:
         move_x = (dx / distance) * self.speed
         move_y = (dy / distance) * self.speed
 
-        new_x = self.x + move_x
-        new_y = self.y + move_y
+        # Current position
+        self.rect.topleft = (
+            int(self.x),
+            int(self.y)
+        )
+
+        # ==========================================
+        # HORIZONTAL MOVEMENT
+        # ==========================================
+
+        new_rect = self.rect.copy()
+        new_rect.x += int(move_x)
 
         collision = False
 
-        for other in enemies:
+        # Check obstacles
+        if obstacles:
 
-            if other is self:
-                continue
+            for obstacle in obstacles:
 
-            if not other.alive:
-                continue
+                if new_rect.colliderect(
+                    obstacle.rect
+                ):
+                    collision = True
+                    break
 
-            if (
-                new_x < other.x + other.width and
-                new_x + self.width > other.x and
-                new_y < other.y + other.height and
-                new_y + self.height > other.y
-            ):
-                collision = True
-                break
+        # Check other enemies
+        if not collision:
+
+            for other in enemies:
+
+                if other is self:
+                    continue
+
+                if not other.alive:
+                    continue
+
+                if new_rect.colliderect(
+                    pygame.Rect(
+                        other.x,
+                        other.y,
+                        other.width,
+                        other.height
+                    )
+                ):
+                    collision = True
+                    break
 
         if not collision:
-            self.x = new_x
-            self.y = new_y
+            self.x += move_x
+
+        # ==========================================
+        # VERTICAL MOVEMENT
+        # ==========================================
+
+        self.rect.topleft = (
+            int(self.x),
+            int(self.y)
+        )
+
+        new_rect = self.rect.copy()
+        new_rect.y += int(move_y)
+
+        collision = False
+
+        # Check obstacles
+        if obstacles:
+
+            for obstacle in obstacles:
+
+                if new_rect.colliderect(
+                    obstacle.rect
+                ):
+                    collision = True
+                    break
+
+        # Check other enemies
+        if not collision:
+
+            for other in enemies:
+
+                if other is self:
+                    continue
+
+                if not other.alive:
+                    continue
+
+                if new_rect.colliderect(
+                    pygame.Rect(
+                        other.x,
+                        other.y,
+                        other.width,
+                        other.height
+                    )
+                ):
+                    collision = True
+                    break
+
+        if not collision:
+            self.y += move_y
+
+        # Update rectangle
+        self.rect.topleft = (
+            int(self.x),
+            int(self.y)
+        )
 
     def check_collision(self, bullet):
 

@@ -11,12 +11,18 @@ class Player:
         # POSITION
         # =====================================================
 
-        self.x = 100
-        self.y = 100
+        self.x = 150
+        self.y = 155
 
-        self.width = 80
-        self.height = 80
+        self.width = 40
+        self.height = 40
 
+        self.rect = pygame.Rect(
+        self.x,
+        self.y,
+        self.width,
+        self.height
+        )
         self.speed = 5
         self.run_speed = 8
 
@@ -1294,7 +1300,7 @@ class Player:
     # MOVEMENT
     # =========================================================
 
-    def move(self):
+    def move(self,obstacles=None):
 
         keys = pygame.key.get_pressed()
 
@@ -1324,10 +1330,11 @@ class Player:
         # =================================================
         # FORWARD
         # =================================================
-
+        dx = 0
+        dy = 0
         if keys[pygame.K_w]:
 
-            self.y -= current_speed
+            dy -= current_speed
 
             self.moving_forward = True
 
@@ -1337,7 +1344,7 @@ class Player:
 
         if keys[pygame.K_s]:
 
-            self.y += self.speed
+            dy += self.speed
 
             self.moving_backward = True
 
@@ -1347,7 +1354,7 @@ class Player:
 
         if keys[pygame.K_a]:
 
-            self.x -= self.speed
+            dx -= self.speed
 
             self.moving_left = True
 
@@ -1357,10 +1364,45 @@ class Player:
 
         if keys[pygame.K_d]:
 
-            self.x += self.speed
+            dx += self.speed
 
             self.moving_right = True
 
+        # Current player rectangle
+        self.rect.topleft = (self.x, self.y)
+
+        # Try horizontal movement
+        new_rect = self.rect.copy()
+        new_rect.x += dx
+
+        collision = False
+
+        if obstacles:
+            for obstacle in obstacles:
+                if new_rect.colliderect(obstacle.rect):
+                    collision = True
+                    break
+
+        if not collision:
+            self.x += dx
+
+        # Try vertical movement
+        new_rect = self.rect.copy()
+        new_rect.y += dy
+
+        collision = False
+
+        if obstacles:
+            for obstacle in obstacles:
+                if new_rect.colliderect(obstacle.rect):
+                    collision = True
+                    break
+
+        if not collision:
+            self.y += dy
+
+        # Update rectangle
+        self.rect.topleft = (self.x, self.y)
         # =================================================
         # FEET ANIMATION
         # =================================================

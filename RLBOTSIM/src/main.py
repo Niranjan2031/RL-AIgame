@@ -665,8 +665,7 @@ while running:
 
     draw_tiled_map(screen, tmx_data)
 
-    for obstacle in obstacles:
-        obstacle.draw(screen)
+
     # =================================================
     # PLAYING
     # =================================================

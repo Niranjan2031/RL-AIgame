@@ -39,6 +39,12 @@ map_path = os.path.join(
 )
 
 tmx_data = pytmx.load_pygame(map_path)
+
+print("MAP LAYERS:")
+
+for layer in tmx_data.visible_layers:
+    print(layer.name)
+
 walls_layer = tmx_data.get_layer_by_name("Walls")
 
 wall_count = 0
@@ -169,7 +175,6 @@ def draw_tiled_map(screen, tmx_data):
 
     # Draw all Tiled layers
     for layer in tmx_data.visible_layers:
-
         if hasattr(layer, "tiles"):
 
             for x, y, image in layer.tiles():
@@ -201,6 +206,123 @@ def draw_tiled_map(screen, tmx_data):
         map_surface,
         (offset_x, offset_y-30)
     )
+
+def draw_door_foreground(screen, tmx_data):
+
+    tile_scale = 1.638
+
+    map_width = tmx_data.width * tmx_data.tilewidth
+    map_height = tmx_data.height * tmx_data.tileheight
+
+    enlarged_width = int(map_width * tile_scale)
+    enlarged_height = int(map_height * tile_scale)
+
+    screen_width, screen_height = screen.get_size()
+
+    offset_x = (screen_width - enlarged_width) // 2
+    offset_y = (screen_height - enlarged_height) // 2
+
+    walls_layer = tmx_data.get_layer_by_name("Walls")
+
+
+    door_areas = [
+
+    # 1. Top-left door
+    pygame.Rect(55, 30, 30, 80),
+
+    # 2. Upper-middle wooden door
+    pygame.Rect(433, 60, 30, 80),
+
+    # 3. Top-center gate
+    pygame.Rect(643, 0, 30, 80),
+
+    # 4. Top-right gate
+    pygame.Rect(903, 35, 30, 80),
+
+    # 5. Left-middle wooden door
+    pygame.Rect(65, 270, 30, 80),
+
+    # 6. Center-left gate
+    pygame.Rect(197, 380, 30, 80),
+
+    # 7. Center gate
+    pygame.Rect(433, 270, 30, 80),
+
+    # 8. Right-middle gate
+    pygame.Rect(642, 350, 30, 80),
+
+    # 9. Lower-center gate
+    pygame.Rect(540, 450, 30, 80),
+
+    # 10. Lower-center wooden door
+    
+    pygame.Rect(408, 530, 30, 80),
+
+    # 11. Lower-left gate
+    pygame.Rect(223, 530, 30, 80),
+
+    # 12. Right-side wooden door
+    pygame.Rect(903, 480, 30, 80),
+
+    # 13. Bottom-right gate
+    pygame.Rect(903, 600, 30, 80),
+    ]
+
+    for x, y, image in walls_layer.tiles():
+
+        wall_x = int(
+            offset_x +
+            x * tmx_data.tilewidth * tile_scale
+        )
+
+        wall_y = int(
+            offset_y - 30 +
+            y * tmx_data.tileheight * tile_scale
+        )
+
+        wall_width = int(
+            image.get_width() * tile_scale
+        )
+
+        wall_height = int(
+            image.get_height() * tile_scale
+        )
+
+        wall_rect = pygame.Rect(
+            wall_x,
+            wall_y,
+            wall_width,
+            wall_height
+        )
+
+        # Check whether this wall tile belongs
+        # to one of the door areas
+        is_door = False
+
+        for door_area in door_areas:
+
+            if door_area.colliderect(wall_rect):
+
+                is_door = True
+                break
+
+        if is_door:
+
+            scaled_image = pygame.transform.scale(
+                image,
+                (
+                    wall_width,
+                    wall_height
+                )
+            )
+
+            screen.blit(
+                scaled_image,
+                (
+                    wall_x,
+                    wall_y
+                )
+            )
 
 
 def load_obstacles(tmx_data):
@@ -821,7 +943,6 @@ while running:
             screen
         )
 
-
         # =================================================
         # ENEMIES
         # =================================================
@@ -857,6 +978,10 @@ while running:
             enemy.draw(
                 screen
             )
+        draw_door_foreground(
+            screen,
+            tmx_data
+        )
 
 
         # =================================================
@@ -1065,7 +1190,139 @@ while running:
                 screen
             )
 
-
+    if game_state == "PLAYING":
+    
+            # ---------------------------------------------
+            # PLAYER HEALTH BAR BACKGROUND
+            # ---------------------------------------------
+    
+            pygame.draw.rect(
+                screen,
+                (100, 100, 100),
+                (
+                    20,
+                    20,
+                    200,
+                    20
+                )
+            )
+    
+    
+            # ---------------------------------------------
+            # PLAYER HEALTH BAR
+            # ---------------------------------------------
+    
+            health_width = (
+                player.health / 30
+            ) * 200
+    
+    
+            health_width = max(
+                0,
+                health_width
+            )
+    
+    
+            pygame.draw.rect(
+                screen,
+                (0, 255, 0),
+                (
+                    20,
+                    20,
+                    health_width,
+                    20
+                )
+            )
+    
+    
+            # ---------------------------------------------
+            # WAVE TEXT
+            # ---------------------------------------------
+    
+            wave_text = font.render(
+                f"Wave: {wave}",
+                True,
+                (255, 255, 255)
+            )
+    
+            screen.blit(
+                wave_text,
+                (20, 50)
+            )
+    
+    
+            # ---------------------------------------------
+            # SCORE TEXT
+            # ---------------------------------------------
+    
+            score_text = font.render(
+                f"Score: {score}",
+                True,
+                (255, 255, 255)
+            )
+    
+            screen.blit(
+                score_text,
+                (20, 80)
+            )
+    
+    
+            # ---------------------------------------------
+            # AMMO
+            # ---------------------------------------------
+    
+            # Knife has no ammo system
+    
+            if (
+                player.current_weapon !=
+                "knife"
+            ):
+    
+                ammo_text = font.render(
+                    f"Ammo: {player.ammo} / "
+                    f"{player.max_ammo}",
+                    True,
+                    (255, 255, 255)
+                )
+    
+                screen.blit(
+                    ammo_text,
+                    (20, 110)
+                )
+    
+    
+            # ---------------------------------------------
+            # CURRENT WEAPON
+            # ---------------------------------------------
+    
+            weapon_text = font.render(
+                f"Weapon: "
+                f"{player.current_weapon.upper()}",
+                True,
+                (255, 255, 255)
+            )
+    
+            screen.blit(
+                weapon_text,
+                (20, 145)
+            )
+    
+    
+            # =================================================
+            # PLAYER
+            # =================================================
+    
+            player.move(obstacles)
+    
+            
+            # ---------------------------------------------
+            # CHECK PLAYER HEALTH
+            # ---------------------------------------------
+    
+            if player.health <= 0:
+    
+                game_state = "GAME_OVER"
+    
     # =====================================================
     # GAME OVER
     # =====================================================

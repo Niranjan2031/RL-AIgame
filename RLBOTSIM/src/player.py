@@ -24,7 +24,7 @@ class Player:
         self.height
         )
         self.speed = 5
-        self.run_speed = 8
+        self.run_speed = 5
 
         self.health = 30
 

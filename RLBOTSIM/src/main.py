@@ -855,7 +855,7 @@ while running:
             # -----------------------------------------
 
             enemy.draw(
-                screen
+                screen,player
             )
 
 

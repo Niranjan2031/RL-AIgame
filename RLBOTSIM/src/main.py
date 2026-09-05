@@ -267,6 +267,7 @@ def draw_door_foreground(screen, tmx_data):
     # 13. Bottom-right gate
     pygame.Rect(903, 600, 30, 80),
     ]
+    
 
     for x, y, image in walls_layer.tiles():
 

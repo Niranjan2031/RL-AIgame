@@ -976,7 +976,7 @@ while running:
             # -----------------------------------------
 
             enemy.draw(
-                screen
+                screen,player
             )
         draw_door_foreground(
             screen,

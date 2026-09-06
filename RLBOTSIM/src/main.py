@@ -210,7 +210,7 @@ def draw_tiled_map(screen, tmx_data):
 def draw_door_foreground(screen, tmx_data):
 
     tile_scale = 1.638
-
+    
     map_width = tmx_data.width * tmx_data.tilewidth
     map_height = tmx_data.height * tmx_data.tileheight
 

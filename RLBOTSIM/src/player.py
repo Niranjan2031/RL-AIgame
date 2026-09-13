@@ -12,7 +12,7 @@ class Player:
         # =====================================================
 
         self.x = 150
-        self.y = 155
+        self.y = 180
 
         self.width = 40
         self.height = 40
@@ -23,8 +23,8 @@ class Player:
         self.width,
         self.height
         )
-        self.speed = 5
-        self.run_speed = 5
+        self.speed = 2.3
+        self.run_speed = 3
 
         self.health = 30
 

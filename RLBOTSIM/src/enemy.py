@@ -3,21 +3,32 @@ import math
 import random
 import time
 import os
+import heapq
 
 
 class Enemy:
 
-    def __init__(self):
+    def __init__(self, spawn_x=None, spawn_y=None):
 
         # =====================================================
         # POSITION
         # =====================================================
 
-        self.x = random.randint(50, 950)
-        self.y = random.randint(50, 650)
+        if spawn_x is not None and spawn_y is not None:
+
+            self.x = spawn_x
+            self.y = spawn_y
+
+        else:
+
+            # Random fallback spawn position
+            self.x = random.randint(50, 950)
+            self.y = random.randint(50, 650)
+
 
         self.width = 40
         self.height = 40
+
 
         self.rect = pygame.Rect(
             self.x,
@@ -26,11 +37,49 @@ class Enemy:
             self.height
         )
 
-        self.speed = 2
+
+        self.speed = 1.0
 
         self.alive = True
         self.health = 30
 
+
+        # =====================================================
+        # A* NAVIGATION SETTINGS
+        # =====================================================
+
+        # Size of each invisible navigation grid cell.
+        self.grid_size = 32
+
+        # Navigation area matches the game window.
+        self.map_left = 0
+        self.map_top = 0
+        self.map_right = 1000
+        self.map_bottom = 700
+
+        # Current A* path.
+        self.path = []
+
+        # Current waypoint index.
+        self.path_index = 0
+
+        # When the path was last calculated.
+        self.last_path_time = (
+            time.time()+random.uniform(-1, 0.0)
+        )
+
+        # Recalculate periodically because the player moves.
+        self.path_recalculate_delay = 1.0
+
+        # Remember last target cell.
+        self.last_target_cell = None
+
+        #stuck detection
+        self.last_position = (self.x, self.y)
+
+        self.stuck_time = 0.0
+        self.last_stuck_check_time = time.time()
+        self.force_new_path = False
 
         # =====================================================
         # ACTION STATES
@@ -52,6 +101,7 @@ class Enemy:
             "knife"
         ]
 
+
         self.current_weapon = random.choice(
             self.available_weapons
         )
@@ -64,33 +114,54 @@ class Enemy:
         self.weapon_stats = {
 
             "handgun": {
-                "damage": 5,
-                "melee_damage": 5,
-                "reload_speed": 0.28
+                "damage": 2,
+                "melee_damage": 1,
+                "shoot_range": 200,
+                "stop_distance": 140,
+                "fire_cooldown": 0.70
             },
 
             "shotgun": {
-                "damage": 12,
-                "melee_damage": 10,
-                "reload_speed": 0.16
+                "damage": 5,
+                "melee_damage": 5,
+                "shoot_range": 110,
+                "stop_distance": 75,
+                "fire_cooldown": 1.20
             },
 
             "rifle": {
-                "damage": 4,
-                "melee_damage": 6,
-                "reload_speed": 0.22
+                "damage": 1,
+                "melee_damage": 2,
+                "shoot_range": 280,
+                "stop_distance": 200,
+                "fire_cooldown": 0.25
             },
 
             "knife": {
                 "damage": None,
-                "melee_damage": 15,
-                "reload_speed": None
+                "melee_damage": 6,
+                "shoot_range": 0,
+                "stop_distance": 0,
+                "fire_cooldown": None
             }
         }
 
 
         # =====================================================
-        # AMMO
+        # COMBAT SETTINGS
+        # =====================================================
+
+        self.melee_range = 55
+        self.melee_cooldown = 0.90
+
+        self.last_shot_time = 0
+        self.last_melee_time = 0
+
+        self.pending_shots = []
+
+
+        # =====================================================
+        # INFINITE AMMO SYSTEM
         # =====================================================
 
         self.weapon_max_ammo = {
@@ -99,6 +170,7 @@ class Enemy:
             "shotgun": 6,
             "rifle": 30
         }
+
 
         if self.current_weapon == "knife":
 
@@ -121,13 +193,9 @@ class Enemy:
         # =====================================================
 
         self.feet_idle_frames = []
-
         self.feet_walk_frames = []
-
         self.feet_run_frames = []
-
         self.feet_strafe_left_frames = []
-
         self.feet_strafe_right_frames = []
 
 
@@ -178,13 +246,9 @@ class Enemy:
         # =====================================================
 
         self.weapon_idle_frames = []
-
         self.weapon_move_frames = []
-
         self.weapon_shoot_frames = []
-
         self.weapon_reload_frames = []
-
         self.weapon_melee_frames = []
 
         self.weapon_animation = []
@@ -195,11 +259,8 @@ class Enemy:
         # =====================================================
 
         self.animation_speed = 0.20
-
         self.melee_animation_speed = 0.38
-
         self.feet_animation_speed = 0.25
-
         self.reload_animation_speed = 0.20
 
 
@@ -208,11 +269,9 @@ class Enemy:
         # =====================================================
 
         self.current_frame = 0
-
         self.feet_frame = 0
 
         self.current_feet_animation = []
-
         self.feet_animation = []
 
 
@@ -236,7 +295,7 @@ class Enemy:
 
 
         # =====================================================
-        # LOAD FRAME FUNCTION
+        # LOAD FRAMES
         # =====================================================
 
         def load_frames(folder):
@@ -252,6 +311,7 @@ class Enemy:
 
                 return frames
 
+
             files = sorted(
                 [
                     file
@@ -259,6 +319,7 @@ class Enemy:
                     if file.lower().endswith(".png")
                 ]
             )
+
 
             for file in files:
 
@@ -281,6 +342,7 @@ class Enemy:
 
                 frames.append(image)
 
+
             return frames
 
 
@@ -289,24 +351,15 @@ class Enemy:
         # =====================================================
 
         self.feet_idle_frames = load_frames(
-            os.path.join(
-                feet_folder,
-                "idle"
-            )
+            os.path.join(feet_folder, "idle")
         )
 
         self.feet_walk_frames = load_frames(
-            os.path.join(
-                feet_folder,
-                "walk"
-            )
+            os.path.join(feet_folder, "walk")
         )
 
         self.feet_run_frames = load_frames(
-            os.path.join(
-                feet_folder,
-                "run"
-            )
+            os.path.join(feet_folder, "run")
         )
 
         self.feet_strafe_left_frames = load_frames(
@@ -325,7 +378,7 @@ class Enemy:
 
 
         # =====================================================
-        # LOAD ALL WEAPON ANIMATIONS
+        # LOAD WEAPON ANIMATIONS
         # =====================================================
 
         def load_weapon(
@@ -346,27 +399,29 @@ class Enemy:
         # HANDGUN
         # =====================================================
 
-        self.handgun_idle_frames = (
-            load_weapon("handgun", "idle")
+        self.handgun_idle_frames = load_weapon(
+            "handgun",
+            "idle"
         )
 
-        self.handgun_move_frames = (
-            load_weapon("handgun", "move")
+        self.handgun_move_frames = load_weapon(
+            "handgun",
+            "move"
         )
 
-        self.handgun_shoot_frames = (
-            load_weapon("handgun", "shoot")
+        self.handgun_shoot_frames = load_weapon(
+            "handgun",
+            "shoot"
         )
 
-        self.handgun_reload_frames = (
-            load_weapon("handgun", "reload")
+        self.handgun_reload_frames = load_weapon(
+            "handgun",
+            "reload"
         )
 
-        self.handgun_melee_frames = (
-            load_weapon(
-                "handgun",
-                "meleeattack"
-            )
+        self.handgun_melee_frames = load_weapon(
+            "handgun",
+            "meleeattack"
         )
 
 
@@ -374,27 +429,29 @@ class Enemy:
         # SHOTGUN
         # =====================================================
 
-        self.shotgun_idle_frames = (
-            load_weapon("shotgun", "idle")
+        self.shotgun_idle_frames = load_weapon(
+            "shotgun",
+            "idle"
         )
 
-        self.shotgun_move_frames = (
-            load_weapon("shotgun", "move")
+        self.shotgun_move_frames = load_weapon(
+            "shotgun",
+            "move"
         )
 
-        self.shotgun_shoot_frames = (
-            load_weapon("shotgun", "shoot")
+        self.shotgun_shoot_frames = load_weapon(
+            "shotgun",
+            "shoot"
         )
 
-        self.shotgun_reload_frames = (
-            load_weapon("shotgun", "reload")
+        self.shotgun_reload_frames = load_weapon(
+            "shotgun",
+            "reload"
         )
 
-        self.shotgun_melee_frames = (
-            load_weapon(
-                "shotgun",
-                "meleeattack"
-            )
+        self.shotgun_melee_frames = load_weapon(
+            "shotgun",
+            "meleeattack"
         )
 
 
@@ -402,27 +459,29 @@ class Enemy:
         # RIFLE
         # =====================================================
 
-        self.rifle_idle_frames = (
-            load_weapon("rifle", "idle")
+        self.rifle_idle_frames = load_weapon(
+            "rifle",
+            "idle"
         )
 
-        self.rifle_move_frames = (
-            load_weapon("rifle", "move")
+        self.rifle_move_frames = load_weapon(
+            "rifle",
+            "move"
         )
 
-        self.rifle_shoot_frames = (
-            load_weapon("rifle", "shoot")
+        self.rifle_shoot_frames = load_weapon(
+            "rifle",
+            "shoot"
         )
 
-        self.rifle_reload_frames = (
-            load_weapon("rifle", "reload")
+        self.rifle_reload_frames = load_weapon(
+            "rifle",
+            "reload"
         )
 
-        self.rifle_melee_frames = (
-            load_weapon(
-                "rifle",
-                "meleeattack"
-            )
+        self.rifle_melee_frames = load_weapon(
+            "rifle",
+            "meleeattack"
         )
 
 
@@ -430,19 +489,19 @@ class Enemy:
         # KNIFE
         # =====================================================
 
-        self.knife_idle_frames = (
-            load_weapon("knife", "idle")
+        self.knife_idle_frames = load_weapon(
+            "knife",
+            "idle"
         )
 
-        self.knife_move_frames = (
-            load_weapon("knife", "move")
+        self.knife_move_frames = load_weapon(
+            "knife",
+            "move"
         )
 
-        self.knife_melee_frames = (
-            load_weapon(
-                "knife",
-                "meleeattack"
-            )
+        self.knife_melee_frames = load_weapon(
+            "knife",
+            "meleeattack"
         )
 
 
@@ -456,7 +515,7 @@ class Enemy:
 
 
         # =====================================================
-        # SET DEFAULT FEET
+        # DEFAULT FEET
         # =====================================================
 
         self.current_feet_animation = (
@@ -467,10 +526,6 @@ class Enemy:
             self.feet_idle_frames
         )
 
-
-        # =====================================================
-        # DEFAULT IMAGES
-        # =====================================================
 
         if len(
             self.current_feet_animation
@@ -498,29 +553,18 @@ class Enemy:
             self.original_image = None
 
 
-        # =====================================================
-        # ATTACK
-        # =====================================================
-
-        self.attack_cooldown = 1.0
-
-        self.last_attack_time = 0
-
-
     # =========================================================
     # SET WEAPON
     # =========================================================
 
-    def set_weapon(self, weapon):
+    def set_weapon(
+        self,
+        weapon
+    ):
 
         if weapon not in self.available_weapons:
-
             return False
 
-
-        # -----------------------------------------------------
-        # HANDGUN
-        # -----------------------------------------------------
 
         if weapon == "handgun":
 
@@ -545,10 +589,6 @@ class Enemy:
             )
 
 
-        # -----------------------------------------------------
-        # SHOTGUN
-        # -----------------------------------------------------
-
         elif weapon == "shotgun":
 
             self.weapon_idle_frames = (
@@ -571,10 +611,6 @@ class Enemy:
                 self.shotgun_melee_frames
             )
 
-
-        # -----------------------------------------------------
-        # RIFLE
-        # -----------------------------------------------------
 
         elif weapon == "rifle":
 
@@ -599,10 +635,6 @@ class Enemy:
             )
 
 
-        # -----------------------------------------------------
-        # KNIFE
-        # -----------------------------------------------------
-
         elif weapon == "knife":
 
             self.weapon_idle_frames = (
@@ -625,10 +657,6 @@ class Enemy:
         self.current_weapon = weapon
 
 
-        # -----------------------------------------------------
-        # AMMO
-        # -----------------------------------------------------
-
         if weapon == "knife":
 
             self.max_ammo = None
@@ -645,10 +673,6 @@ class Enemy:
             self.ammo = self.max_ammo
 
 
-        # -----------------------------------------------------
-        # DEFAULT ANIMATION
-        # -----------------------------------------------------
-
         self.current_frame = 0
 
         self.weapon_animation = (
@@ -662,34 +686,748 @@ class Enemy:
     # DAMAGE
     # =========================================================
 
-    def take_damage(self, damage):
+    def take_damage(
+        self,
+        damage
+    ):
 
         self.health -= damage
 
         if self.health <= 0:
 
             self.health = 0
-
             self.alive = False
 
 
     # =========================================================
-    # SHOOT ANIMATION
+    # LINE OF SIGHT
     # =========================================================
 
-    def shoot(self):
+    def has_line_of_sight(
+        self,
+        player,
+        obstacles
+    ):
+
+        if not obstacles:
+            return True
+
+
+        enemy_center = (
+            self.x + self.width / 2,
+            self.y + self.height / 2
+        )
+
+        player_center = (
+            player.x + player.width / 2,
+            player.y + player.height / 2
+        )
+
+
+        for obstacle in obstacles:
+
+            if obstacle.rect.clipline(
+                enemy_center,
+                player_center
+            ):
+
+                return False
+
+
+        return True
+
+
+    # =========================================================
+    # GRID CONVERSION
+    # =========================================================
+    # =========================================================
+# UPDATE NAVIGATION BOUNDS
+# =========================================================
+
+    def update_navigation_bounds(
+      self,
+      player,
+      obstacles
+   ):
+
+    # Start with the current enemy/player area.
+      left = min(
+        self.x,
+        player.x
+     )
+
+      top = min(
+        self.y,
+        player.y
+     )
+
+      right = max(
+        self.x + self.width,
+        player.x + player.width
+     )
+
+      bottom = max(
+        self.y + self.height,
+        player.y + player.height
+     )
+
+
+    # Expand bounds using actual scaled obstacle coordinates.
+      for obstacle in obstacles:
+
+         left = min(
+            left,
+            obstacle.rect.left
+         )
+
+         top = min(
+            top,
+            obstacle.rect.top
+         )
+
+         right = max(
+            right,
+            obstacle.rect.right
+         )
+
+         bottom = max(
+             bottom,
+            obstacle.rect.bottom
+         )
+
+
+    # Add navigation padding around the actual map objects.
+      padding = 150
+
+
+      self.map_left = (
+        left - padding
+      )
+
+      self.map_top = (
+        top - padding
+      )
+
+      self.map_right = (
+        right + padding
+      )
+
+      self.map_bottom = (
+        bottom + padding
+      )
+    
+    
+    def world_to_grid(
+        self,
+        x,
+        y
+    ):
+
+        return (
+
+            int(x-self.map_left) // self.grid_size,
+
+            int(y-self.map_top) // self.grid_size
+        )
+
+
+    def grid_to_world(
+        self,
+        cell
+    ):
+
+        grid_x, grid_y = cell
+
+        return (
+
+            self.map_left +
+            grid_x *
+            self.grid_size +
+            self.grid_size / 2,
+
+            self.map_top +
+            grid_y *
+            self.grid_size +
+            self.grid_size / 2
+        )
+
+
+    # =========================================================
+    # CHECK GRID CELL
+    # =========================================================
+
+    def is_cell_walkable(
+        self,
+        cell,
+        obstacles
+    ):
+
+        world_x, world_y = (
+            self.grid_to_world(
+                cell
+            )
+        )
+
+       #check navigation bounds
+        if (world_x - self.width / 2 < self.map_left):
+            return False
+
+        if (world_y -self.height / 2 <self.map_top):
+            return False
+        if (world_x + self.width / 2 > self.map_right):
+            return False
+        if (world_y + self.height / 2 > self.map_bottom):
+            return False
+
+        #check complete enemy body
+        enemy_test_rect = pygame.Rect(
+            int(
+                world_x -
+                self.width / 2
+            ),
+
+            int(
+                world_y -
+                self.height / 2
+            ),
+
+            self.width,
+
+            self.height
+        )
+        for obstacle in obstacles:
+
+            if enemy_test_rect.colliderect(
+                obstacle.rect
+            ):
+
+                return False
+      
+
+
+
+        return True
+
+
+    # =========================================================
+    # FIND NEAREST WALKABLE CELL
+    # =========================================================
+
+    def find_nearest_walkable(
+        self,
+        start_cell,
+        obstacles
+    ):
+
+        if self.is_cell_walkable(
+            start_cell,
+            obstacles
+        ):
+
+            return start_cell
+
+
+        queue = [
+            start_cell
+        ]
+
+        visited = {
+            start_cell
+        }
+
+
+        directions = [
+
+            (1, 0),
+            (-1, 0),
+            (0, 1),
+            (0, -1)
+        ]
+
+
+        while queue:
+
+            current = queue.pop(0)
+
+
+            for dx, dy in directions:
+
+                neighbour = (
+
+                    current[0] + dx,
+
+                    current[1] + dy
+                )
+
+
+                if neighbour in visited:
+                    continue
+
+
+                visited.add(
+                    neighbour
+                )
+
+
+                if self.is_cell_walkable(
+                    neighbour,
+                    obstacles
+                ):
+
+                    return neighbour
+
+
+                queue.append(
+                    neighbour
+                )
+
+
+        return None
+
+
+    # =========================================================
+    # A* HEURISTIC
+    # =========================================================
+
+    def heuristic(
+        self,
+        cell_a,
+        cell_b
+    ):
+
+        return (
+
+            abs(
+                cell_a[0] -
+                cell_b[0]
+            )
+
+            +
+
+            abs(
+                cell_a[1] -
+                cell_b[1]
+            )
+        )
+
+
+    # =========================================================
+    # A* PATHFINDING
+    # =========================================================
+
+    def calculate_path(
+        self,
+        target_x,
+        target_y,
+        obstacles
+    ):
+
+        enemy_center_x = (
+            self.x +
+            self.width / 2
+        )
+
+        enemy_center_y = (
+            self.y +
+            self.height / 2
+        )
+
+
+        start_cell = (
+            self.world_to_grid(
+                enemy_center_x,
+                enemy_center_y
+            )
+        )
+
+
+        target_cell = (
+            self.world_to_grid(
+                target_x,
+                target_y
+            )
+        )
+
+
+        start_cell = (
+            self.find_nearest_walkable(
+                start_cell,
+                obstacles
+            )
+        )
+
+
+        target_cell = (
+            self.find_nearest_walkable(
+                target_cell,
+                obstacles
+            )
+        )
+
+
+        if start_cell is None:
+            return []
+
+        if target_cell is None:
+            return []
+
+
+        open_heap = []
+
+        heapq.heappush(
+            open_heap,
+            (
+                0,
+                start_cell
+            )
+        )
+
+
+        came_from = {}
+
+        g_score = {
+            start_cell: 0
+        }
+
+
+        closed_set = set()
+
+
+        directions = [
+
+            (1, 0),
+            (-1, 0),
+            (0, 1),
+            (0, -1),
+
+            (1, 1),
+            (1, -1),
+            (-1, 1),
+            (-1, -1)
+        ]
+
+
+        while open_heap:
+
+
+            current = (
+                heapq.heappop(
+                    open_heap
+                )[1]
+            )
+
+
+            if current in closed_set:
+                continue
+
+
+            if current == target_cell:
+
+
+                path = []
+
+                while current in came_from:
+
+                    path.append(
+                        current
+                    )
+
+                    current = (
+                        came_from[
+                            current
+                        ]
+                    )
+
+
+                path.reverse()
+
+
+                # Convert grid cells into
+                # actual screen waypoints.
+
+                world_path = []
+
+
+                for cell in path:
+
+                    world_path.append(
+
+                        self.grid_to_world(
+                            cell
+                        )
+                    )
+
+
+                return world_path
+
+
+            closed_set.add(
+                current
+            )
+
+
+            for dx, dy in directions:
+
+
+                neighbour = (
+
+                    current[0] + dx,
+
+                    current[1] + dy
+                )
+
+
+                if neighbour in closed_set:
+                    continue
+
+
+                if not self.is_cell_walkable(
+                    neighbour,
+                    obstacles
+                ):
+
+                    continue
+
+
+                # Prevent diagonal corner cutting.
+
+                if dx != 0 and dy != 0:
+
+
+                    side_a = (
+
+                        current[0] + dx,
+
+                        current[1]
+                    )
+
+
+                    side_b = (
+
+                        current[0],
+
+                        current[1] + dy
+                    )
+
+
+                    if (
+
+                        not self.is_cell_walkable(
+                            side_a,
+                            obstacles
+                        )
+
+                        or
+
+                        not self.is_cell_walkable(
+                            side_b,
+                            obstacles
+                        )
+
+                    ):
+
+                        continue
+
+
+                if dx != 0 and dy != 0:
+
+                    movement_cost = (
+                        1.414
+                    )
+
+                else:
+
+                    movement_cost = 1
+
+
+                tentative_g_score = (
+
+                    g_score[
+                        current
+                    ]
+
+                    +
+
+                    movement_cost
+                )
+
+
+                if (
+
+                    neighbour
+                    not in g_score
+
+                    or
+
+                    tentative_g_score
+                    <
+                    g_score[
+                        neighbour
+                    ]
+
+                ):
+
+
+                    came_from[
+                        neighbour
+                    ] = current
+
+
+                    g_score[
+                        neighbour
+                    ] = (
+                        tentative_g_score
+                    )
+
+
+                    f_score = (
+
+                        tentative_g_score
+
+                        +
+
+                        self.heuristic(
+                            neighbour,
+                            target_cell
+                        )
+                    )
+
+
+                    heapq.heappush(
+
+                        open_heap,
+
+                        (
+
+                            f_score,
+
+                            neighbour
+                        )
+                    )
+
+
+        return []
+
+
+    # =========================================================
+    # UPDATE NAVIGATION PATH
+    # =========================================================
+
+    def update_path(
+        self,
+        player,
+        obstacles
+    ):
+
+        current_time = time.time()
+
+        self.update_navigation_bounds(
+            player,
+            obstacles
+        )
+
+        if(
+            not self.force_new_path
+
+            and
+
+            current_time - self.last_path_time
+            <
+            self.path_recalculate_delay
+        ):
+
+            return
+
+
+        target_x = (
+            player.x +
+            player.width / 2
+        )
+
+        target_y = (
+            player.y +
+            player.height / 2
+        )
+
+
+        target_cell = (
+            self.world_to_grid(
+                target_x,
+                target_y
+            )
+        )
+
+
+        should_recalculate = False
+
+
+        if len(self.path) == 0:
+
+            should_recalculate = True
+
+        elif self.force_new_path:
+
+            should_recalculate = True
+        elif(
+            target_cell != self.last_target_cell
+        ):
+
+            should_recalculate = True
+
+        elif (
+
+            current_time -
+            self.last_path_time
+            >=
+            self.path_recalculate_delay
+
+        ):
+
+            should_recalculate = True
+        if not should_recalculate:
+            return 
+        self.path = (
+            self.calculate_path(
+                target_x,
+                target_y,
+                obstacles
+            )
+        )
+
+
+        self.path_index = 0
+
+        self.last_path_time = (
+                current_time
+     )
+
+        self.last_target_cell = (
+                target_cell
+     )
+
+        self.force_new_path = False
+
+
+    # =========================================================
+    # SHOOT
+    # =========================================================
+
+    def shoot(
+        self,
+        player
+    ):
 
         if self.current_weapon == "knife":
-
             return False
+
 
         if (
             self.is_shooting
             or self.is_reloading
             or self.is_melee
         ):
-
             return False
+
 
         if self.ammo <= 0:
 
@@ -697,13 +1435,40 @@ class Enemy:
 
             return False
 
+
+        current_time = time.time()
+
+
+        cooldown = (
+            self.weapon_stats[
+                self.current_weapon
+            ]["fire_cooldown"]
+        )
+
+
+        if (
+
+            current_time -
+            self.last_shot_time
+
+            <
+
+            cooldown
+
+        ):
+
+            return False
+
+
         if len(
             self.weapon_shoot_frames
         ) == 0:
 
             return False
 
+
         self.ammo -= 1
+
 
         self.is_shooting = True
 
@@ -713,7 +1478,123 @@ class Enemy:
 
         self.current_frame = 0
 
+        self.last_shot_time = (
+            current_time
+        )
+
+
+        enemy_center_x = (
+            self.x +
+            self.width / 2
+        )
+
+        enemy_center_y = (
+            self.y +
+            self.height / 2
+        )
+
+
+        player_center_x = (
+            player.x +
+            player.width / 2
+        )
+
+        player_center_y = (
+            player.y +
+            player.height / 2
+        )
+
+
+        dx = (
+            player_center_x -
+            enemy_center_x
+        )
+
+        dy = (
+            player_center_y -
+            enemy_center_y
+        )
+
+
+        distance = math.sqrt(
+            dx ** 2 +
+            dy ** 2
+        )
+
+
+        if distance == 0:
+            return False
+
+
+        direction_x = (
+            dx /
+            distance
+        )
+
+        direction_y = (
+            dy /
+            distance
+        )
+
+
+        muzzle_distance = 25
+
+
+        bullet_x = (
+
+            enemy_center_x
+
+            +
+
+            direction_x *
+            muzzle_distance
+        )
+
+        bullet_y = (
+
+            enemy_center_y
+
+            +
+
+            direction_y *
+            muzzle_distance
+        )
+
+
+        self.pending_shots.append({
+
+            "x": bullet_x,
+
+            "y": bullet_y,
+
+            "target_x": player_center_x,
+
+            "target_y": player_center_y,
+
+            "damage": self.weapon_stats[
+                self.current_weapon
+            ]["damage"],
+
+            "weapon": self.current_weapon
+        })
+
+
         return True
+
+
+    # =========================================================
+    # GET PENDING SHOTS
+    # =========================================================
+
+    def get_pending_shots(self):
+
+        shots = (
+            self.pending_shots[:]
+        )
+
+        self.pending_shots.clear()
+
+        return shots
 
 
     # =========================================================
@@ -723,24 +1604,31 @@ class Enemy:
     def reload(self):
 
         if self.current_weapon == "knife":
-
             return False
+
 
         if (
             self.is_shooting
             or self.is_reloading
             or self.is_melee
         ):
-
             return False
+
+
+        if self.ammo >= self.max_ammo:
+            return False
+
 
         if len(
             self.weapon_reload_frames
         ) == 0:
 
-            self.ammo = self.max_ammo
+            self.ammo = (
+                self.max_ammo
+            )
 
             return True
+
 
         self.is_reloading = True
 
@@ -754,24 +1642,86 @@ class Enemy:
 
 
     # =========================================================
+    # START AUTO RELOAD
+    # =========================================================
+
+    def start_auto_reload_if_needed(self):
+
+        if self.current_weapon == "knife":
+            return
+
+
+        if self.ammo is None:
+            return
+
+
+        if self.ammo > 0:
+            return
+
+
+        if self.is_reloading:
+            return
+
+
+        if len(
+            self.weapon_reload_frames
+        ) > 0:
+
+            self.is_reloading = True
+
+            self.weapon_animation = (
+                self.weapon_reload_frames
+            )
+
+            self.current_frame = 0
+
+        else:
+
+            self.ammo = (
+                self.max_ammo
+            )
+
+
+    # =========================================================
     # MELEE ATTACK
     # =========================================================
 
-    def melee_attack(self):
+    def melee_attack(
+        self,
+        player
+    ):
 
         if (
             self.is_shooting
             or self.is_reloading
             or self.is_melee
         ):
+            return False
+
+
+        current_time = time.time()
+
+
+        if (
+
+            current_time -
+            self.last_melee_time
+
+            <
+
+            self.melee_cooldown
+
+        ):
 
             return False
+
 
         if len(
             self.weapon_melee_frames
         ) == 0:
 
             return False
+
 
         self.is_melee = True
 
@@ -781,7 +1731,135 @@ class Enemy:
 
         self.current_frame = 0
 
+
+        damage = (
+            self.weapon_stats[
+                self.current_weapon
+            ]["melee_damage"]
+        )
+
+
+        player.take_damage(
+            damage
+        )
+
+
+        self.last_melee_time = (
+            current_time
+        )
+
+
         return True
+
+
+    # =========================================================
+    # COMBAT AI
+    # =========================================================
+
+    def update_combat(
+        self,
+        player,
+        obstacles=None
+    ):
+
+        if not self.alive:
+            return
+
+
+        enemy_center_x = (
+            self.x +
+            self.width / 2
+        )
+
+        enemy_center_y = (
+            self.y +
+            self.height / 2
+        )
+
+
+        player_center_x = (
+            player.x +
+            player.width / 2
+        )
+
+        player_center_y = (
+            player.y +
+            player.height / 2
+        )
+
+
+        dx = (
+            player_center_x -
+            enemy_center_x
+        )
+
+        dy = (
+            player_center_y -
+            enemy_center_y
+        )
+
+
+        distance = math.sqrt(
+            dx ** 2 +
+            dy ** 2
+        )
+
+
+        # =====================================================
+        # MELEE PRIORITY
+        # =====================================================
+
+        if distance <= self.melee_range:
+
+            # Prevent melee through obstacles.
+
+            if self.has_line_of_sight(
+                player,
+                obstacles
+            ):
+
+                self.melee_attack(
+                    player
+                )
+
+            return
+
+
+        # =====================================================
+        # KNIFE DOES NOT SHOOT
+        # =====================================================
+
+        if self.current_weapon == "knife":
+
+            return
+
+
+        # =====================================================
+        # SHOOT RANGE
+        # =====================================================
+
+        shoot_range = (
+            self.weapon_stats[
+                self.current_weapon
+            ]["shoot_range"]
+        )
+
+
+        if distance <= shoot_range:
+
+
+            # Enemy can ONLY shoot if the player
+            # is visible and no obstacle blocks
+            # the line.
+
+            if self.has_line_of_sight(
+                player,
+                obstacles
+            ):
+
+                self.shoot(
+                    player
+                )
 
 
     # =========================================================
@@ -803,11 +1881,13 @@ class Enemy:
                 self.melee_animation_speed
             )
 
+
         elif self.is_reloading:
 
             self.current_frame += (
                 self.reload_animation_speed
             )
+
 
         else:
 
@@ -817,9 +1897,17 @@ class Enemy:
 
 
         if (
+
             self.current_frame
-            >= len(self.weapon_animation)
+
+            >=
+
+            len(
+                self.weapon_animation
+            )
+
         ):
+
 
             if self.is_shooting:
 
@@ -827,9 +1915,26 @@ class Enemy:
 
                 self.current_frame = 0
 
-                self.weapon_animation = (
-                    self.weapon_idle_frames
-                )
+
+                if (
+
+                    self.current_weapon
+                    !=
+                    "knife"
+
+                    and
+
+                    self.ammo <= 0
+
+                ):
+
+                    self.start_auto_reload_if_needed()
+
+                else:
+
+                    self.weapon_animation = (
+                        self.weapon_idle_frames
+                    )
 
 
             elif self.is_reloading:
@@ -838,7 +1943,11 @@ class Enemy:
 
                 self.current_frame = 0
 
-                self.ammo = self.max_ammo
+
+                self.ammo = (
+                    self.max_ammo
+                )
+
 
                 self.weapon_animation = (
                     self.weapon_idle_frames
@@ -861,10 +1970,26 @@ class Enemy:
                 self.current_frame = 0
 
 
+        if len(
+            self.weapon_animation
+        ) == 0:
+
+            return
+
+
         frame_index = (
-            int(self.current_frame)
-            % len(self.weapon_animation)
+
+            int(
+                self.current_frame
+            )
+
+            %
+
+            len(
+                self.weapon_animation
+            )
         )
+
 
         self.original_image = (
             self.weapon_animation[
@@ -892,21 +2017,33 @@ class Enemy:
 
 
         if (
+
             self.feet_frame
-            >= len(
+
+            >=
+
+            len(
                 self.current_feet_animation
             )
+
         ):
 
             self.feet_frame = 0
 
 
         frame_index = (
-            int(self.feet_frame)
-            % len(
+
+            int(
+                self.feet_frame
+            )
+
+            %
+
+            len(
                 self.current_feet_animation
             )
         )
+
 
         self.original_feet_image = (
             self.current_feet_animation[
@@ -915,6 +2052,139 @@ class Enemy:
         )
 
 
+    # =========================================================
+    # CHECK MOVEMENT COLLISION
+    # =========================================================
+
+    def can_move_to(
+        self,
+        new_x,
+        new_y,
+        enemies,
+        obstacles
+    ):
+
+        test_rect = pygame.Rect(
+
+            int(new_x),
+
+            int(new_y),
+
+            self.width,
+
+            self.height
+        )
+
+
+        if obstacles:
+
+            for obstacle in obstacles:
+
+                if test_rect.colliderect(
+                    obstacle.rect
+                ):
+
+                    return False
+
+
+        for other in enemies:
+
+            if other is self:
+                continue
+
+            if not other.alive:
+                continue
+
+
+            other_rect = pygame.Rect(
+
+                int(other.x),
+
+                int(other.y),
+
+                other.width,
+
+                other.height
+            )
+
+
+            if test_rect.colliderect(
+                other_rect
+            ):
+
+                return False
+
+
+        return True
+
+
+        # =========================================================
+# CHECK IF ENEMY IS STUCK
+# =========================================================
+
+    def check_if_stuck(self):
+
+     current_time = time.time()
+
+
+     elapsed = (
+        current_time -
+        self.last_stuck_check_time
+     )
+
+
+     if elapsed < 0.40:
+
+        return
+
+
+     moved_distance = math.sqrt(
+
+        (
+            self.x -
+            self.last_position[0]
+        ) ** 2
+
+        +
+
+        (
+            self.y -
+            self.last_position[1]
+        ) ** 2
+     )
+
+
+    # Enemy should have moved but barely moved.
+     if moved_distance < 2:
+
+        self.stuck_time += elapsed
+
+     else:
+
+        self.stuck_time = 0
+
+
+     self.last_position = (
+        self.x,
+        self.y
+     )
+
+
+     self.last_stuck_check_time = (
+        current_time
+     )
+
+
+    # Force a new route.
+     if self.stuck_time >= 1.0:
+
+        self.path = []
+        self.path_index = 0
+
+        self.force_new_path = True
+
+        self.stuck_time = 0
+    
     # =========================================================
     # MOVE
     # =========================================================
@@ -927,15 +2197,198 @@ class Enemy:
     ):
 
         if not self.alive:
+            return
+        self.check_if_stuck()
 
+
+        if (
+            self.is_melee
+            or self.is_shooting
+            or self.is_reloading
+        ):
             return
 
 
-        # Direction toward player
+        enemy_center_x = (
+            self.x +
+            self.width / 2
+        )
 
-        dx = player.x - self.x
+        enemy_center_y = (
+            self.y +
+            self.height / 2
+        )
 
-        dy = player.y - self.y
+
+        player_center_x = (
+            player.x +
+            player.width / 2
+        )
+
+        player_center_y = (
+            player.y +
+            player.height / 2
+        )
+
+
+        dx_to_player = (
+            player_center_x -
+            enemy_center_x
+        )
+
+        dy_to_player = (
+            player_center_y -
+            enemy_center_y
+        )
+
+
+        player_distance = math.sqrt(
+
+            dx_to_player ** 2
+
+            +
+
+            dy_to_player ** 2
+        )
+
+
+        # =====================================================
+        # GUN ENEMIES:
+        # STOP ONLY IF THEY HAVE A CLEAR LINE OF SIGHT
+        # AND ARE CLOSE ENOUGH.
+        # =====================================================
+
+        if self.current_weapon != "knife":
+
+            stop_distance = (
+                self.weapon_stats[
+                    self.current_weapon
+                ]["stop_distance"]
+            )
+
+
+            visible = (
+                self.has_line_of_sight(
+                    player,
+                    obstacles
+                )
+            )
+
+
+            if (
+
+                visible
+
+                and
+
+                player_distance <=
+                stop_distance
+
+            ):
+
+
+                self.path = []
+                self.path_index = 0
+
+
+                self.current_feet_animation = (
+                    self.feet_idle_frames
+                )
+
+                self.weapon_animation = (
+                    self.weapon_idle_frames
+                )
+
+                return
+
+
+        # =====================================================
+        # UPDATE A* PATH
+        # =====================================================
+
+        self.update_path(
+            player,
+            obstacles
+        )
+
+
+        # =====================================================
+        # CHOOSE MOVEMENT TARGET
+        # =====================================================
+
+        target_x = player_center_x
+        target_y = player_center_y
+
+
+        if len(self.path) > 0:
+
+
+            # Skip reached waypoints.
+
+            while (
+                self.path_index <
+                len(self.path)
+            ):
+
+
+                waypoint_x, waypoint_y = (
+                    self.path[
+                        self.path_index
+                    ]
+                )
+
+
+                waypoint_distance = math.sqrt(
+
+                    (
+                        waypoint_x -
+                        enemy_center_x
+                    ) ** 2
+
+                    +
+
+                    (
+                        waypoint_y -
+                        enemy_center_y
+                    ) ** 2
+                )
+
+
+                if waypoint_distance < 8:
+
+                    self.path_index += 1
+
+                else:
+
+                    break
+
+
+            if (
+                self.path_index <
+                len(self.path)
+            ):
+
+
+                target_x, target_y = (
+                    self.path[
+                        self.path_index
+                    ]
+                )
+
+
+        # =====================================================
+        # MOVE TOWARD CURRENT WAYPOINT
+        # =====================================================
+
+        dx = (
+            target_x -
+            enemy_center_x
+        )
+
+        dy = (
+            target_y -
+            enemy_center_y
+        )
 
 
         distance = math.sqrt(
@@ -945,166 +2398,74 @@ class Enemy:
 
 
         if distance == 0:
-
             return
 
 
         move_x = (
-            dx / distance
+            dx /
+            distance
         ) * self.speed
+
 
         move_y = (
-            dy / distance
+            dy /
+            distance
         ) * self.speed
 
 
-        # =================================================
-        # MOVING ANIMATION
-        # =================================================
+        self.current_feet_animation = (
+            self.feet_walk_frames
+        )
 
-        if (
-            not self.is_shooting
-            and not self.is_reloading
-            and not self.is_melee
+        self.weapon_animation = (
+            self.weapon_move_frames
+        )
+
+
+        # =====================================================
+        # HORIZONTAL MOVEMENT
+        # =====================================================
+
+        new_x = (
+            self.x +
+            move_x
+        )
+
+
+        if self.can_move_to(
+            new_x,
+            self.y,
+            enemies,
+            obstacles
         ):
 
-            self.current_feet_animation = (
-                self.feet_walk_frames
-            )
-
-            self.weapon_animation = (
-                self.weapon_move_frames
-            )
+            self.x = new_x
 
 
-        # =================================================
-        # HORIZONTAL MOVEMENT
-        # =================================================
-
-        self.rect.topleft = (
-            int(self.x),
-            int(self.y)
-        )
-
-
-        new_rect = self.rect.copy()
-
-        new_rect.x += int(move_x)
-
-        collision = False
-
-
-        if obstacles:
-
-            for obstacle in obstacles:
-
-                if new_rect.colliderect(
-                    obstacle.rect
-                ):
-
-                    collision = True
-
-                    break
-
-
-        if not collision:
-
-            for other in enemies:
-
-                if other is self:
-
-                    continue
-
-                if not other.alive:
-
-                    continue
-
-                other_rect = pygame.Rect(
-                    other.x,
-                    other.y,
-                    other.width,
-                    other.height
-                )
-
-                if new_rect.colliderect(
-                    other_rect
-                ):
-
-                    collision = True
-
-                    break
-
-
-        if not collision:
-
-            self.x += move_x
-
-
-        # =================================================
+        # =====================================================
         # VERTICAL MOVEMENT
-        # =================================================
+        # =====================================================
 
-        self.rect.topleft = (
-            int(self.x),
-            int(self.y)
+        new_y = (
+            self.y +
+            move_y
         )
 
 
-        new_rect = self.rect.copy()
+        if self.can_move_to(
+            self.x,
+            new_y,
+            enemies,
+            obstacles
+        ):
 
-        new_rect.y += int(move_y)
-
-        collision = False
-
-
-        if obstacles:
-
-            for obstacle in obstacles:
-
-                if new_rect.colliderect(
-                    obstacle.rect
-                ):
-
-                    collision = True
-
-                    break
-
-
-        if not collision:
-
-            for other in enemies:
-
-                if other is self:
-
-                    continue
-
-                if not other.alive:
-
-                    continue
-
-                other_rect = pygame.Rect(
-                    other.x,
-                    other.y,
-                    other.width,
-                    other.height
-                )
-
-                if new_rect.colliderect(
-                    other_rect
-                ):
-
-                    collision = True
-
-                    break
-
-
-        if not collision:
-
-            self.y += move_y
+            self.y = new_y
 
 
         self.rect.topleft = (
+
             int(self.x),
+
             int(self.y)
         )
 
@@ -1120,18 +2481,12 @@ class Enemy:
     ):
 
         if not self.alive:
-
             return
 
 
         self.update_weapon_animation()
-
         self.update_feet_animation()
 
-
-        # =================================================
-        # ENEMY CENTER
-        # =================================================
 
         center_x = (
             self.x +
@@ -1144,9 +2499,9 @@ class Enemy:
         )
 
 
-        # =================================================
+        # =====================================================
         # FACE PLAYER
-        # =================================================
+        # =====================================================
 
         player_center_x = (
             player.x +
@@ -1178,14 +2533,15 @@ class Enemy:
         )
 
 
-        # =================================================
+        # =====================================================
         # FEET
-        # =================================================
+        # =====================================================
 
         if (
             self.original_feet_image
             is not None
         ):
+
 
             rotated_feet = (
                 pygame.transform.rotate(
@@ -1193,6 +2549,7 @@ class Enemy:
                     angle
                 )
             )
+
 
             feet_rect = (
                 rotated_feet.get_rect(
@@ -1203,20 +2560,22 @@ class Enemy:
                 )
             )
 
+
             screen.blit(
                 rotated_feet,
                 feet_rect.topleft
             )
 
 
-        # =================================================
-        # WEAPON / BODY
-        # =================================================
+        # =====================================================
+        # BODY / WEAPON
+        # =====================================================
 
         if (
             self.original_image
             is not None
         ):
+
 
             rotated_weapon = (
                 pygame.transform.rotate(
@@ -1224,6 +2583,7 @@ class Enemy:
                     angle
                 )
             )
+
 
             weapon_rect = (
                 rotated_weapon.get_rect(
@@ -1234,15 +2594,16 @@ class Enemy:
                 )
             )
 
+
             screen.blit(
                 rotated_weapon,
                 weapon_rect.topleft
             )
 
 
-        # =================================================
+        # =====================================================
         # HEALTH BAR
-        # =================================================
+        # =====================================================
 
         pygame.draw.rect(
             screen,
@@ -1256,15 +2617,24 @@ class Enemy:
         )
 
 
+        health_width = max(
+            0,
+            (
+                self.health /
+                30
+            )
+            *
+            self.width
+        )
+
+
         pygame.draw.rect(
             screen,
             (0, 255, 0),
             (
                 self.x,
                 self.y - 12,
-                (
-                    self.health / 30
-                ) * self.width,
+                health_width,
                 6
             )
         )
@@ -1280,7 +2650,6 @@ class Enemy:
     ):
 
         if not self.alive:
-
             return False
 
 
@@ -1300,7 +2669,6 @@ class Enemy:
     ):
 
         if not self.alive:
-
             return False
 
 
@@ -1310,7 +2678,7 @@ class Enemy:
 
 
     # =========================================================
-    # MELEE DAMAGE
+    # OLD ATTACK METHOD
     # =========================================================
 
     def attack(
@@ -1318,36 +2686,6 @@ class Enemy:
         player
     ):
 
-        if not self.alive:
-
-            return
-
-
-        current_time = time.time()
-
-
-        if (
-            current_time
-            -
-            self.last_attack_time
-            >=
-            self.attack_cooldown
-        ):
-
-            damage = (
-                self.weapon_stats[
-                    self.current_weapon
-                ][
-                    "melee_damage"
-                ]
-            )
-
-
-            player.take_damage(
-                damage
-            )
-
-
-            self.last_attack_time = (
-                current_time
-            )
+        self.melee_attack(
+            player
+        )

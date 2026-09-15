@@ -1104,6 +1104,8 @@ def draw_tiled_map(
         )
     )
 
+    # Map scale
+    tile_scale = 1.638
 
     # -------------------------------------------------
     # CENTER MAP
@@ -1119,12 +1121,45 @@ def draw_tiled_map(
         enlarged_width
     ) // 2
 
+    # Draw all Tiled layers
+    for layer in tmx_data.visible_layers:
+        if layer.name == "traps":
+            continue  # Skip the "traps" layer
+        if hasattr(layer, "tiles"):
+
+            for x, y, image in layer.tiles():
+
+                gid = layer.data[y][x]
+
+                # Get animation frame if this tile is animated
+                animated_image = get_animated_tile_image(
+                    tmx_data,
+                    gid
+                )
+
+                if animated_image is not None:
+                    image = animated_image
+
+                # Draw tile at its ORIGINAL size
+                map_surface.blit(
+                    image,
+                    (
+                        x * tmx_data.tilewidth,
+                        y * tmx_data.tileheight
+                    )
+                )
+
+    # Scale the COMPLETE map ONCE
+    enlarged_width = int(map_width * tile_scale)
+    enlarged_height = int(map_height * tile_scale)
 
     offset_y = (
         screen_height -
         enlarged_height
     ) // 2
 
+    # Center the map
+    screen_width, screen_height = screen.get_size()
 
     # -------------------------------------------------
     # DRAW MAP
@@ -1138,6 +1173,37 @@ def draw_tiled_map(
         )
     )
 
+        (offset_x, offset_y - 30)
+    )
+
+
+def get_animated_tile_image(tmx_data, gid):
+    """Return the current animation frame for an animated tile."""
+
+    properties = tmx_data.get_tile_properties_by_gid(gid)
+
+    if not properties or not properties.get("frames"):
+        return tmx_data.get_tile_image_by_gid(gid)
+
+    frames = properties["frames"]
+
+    total_duration = sum(frame.duration for frame in frames)
+
+    current_time = pygame.time.get_ticks() % total_duration
+
+    elapsed = 0
+
+    for frame in frames:
+
+        elapsed += frame.duration
+
+        if current_time < elapsed:
+            return tmx_data.get_tile_image_by_gid(frame.gid)
+
+    return tmx_data.get_tile_image_by_gid(frames[0].gid)
+
+
+def draw_door_foreground(screen, tmx_data):
 
 # =====================================================
 # DRAW FOREGROUND DOORS

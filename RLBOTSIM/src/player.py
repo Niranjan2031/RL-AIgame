@@ -12,7 +12,7 @@ class Player:
         # =====================================================
 
         self.x = 150
-        self.y = 155
+        self.y = 180
 
         self.width = 40
         self.height = 40
@@ -23,8 +23,8 @@ class Player:
         self.width,
         self.height
         )
-        self.speed = 5
-        self.run_speed = 5
+        self.speed = 2.3
+        self.run_speed = 3
 
         self.health = 30
 
@@ -1328,13 +1328,50 @@ class Player:
             current_speed = self.run_speed
 
         # =================================================
-        # FORWARD
+        # MOUSE-FACING DIRECTION
         # =================================================
+        # Movement is relative to where the player is aiming.
+        # W = forward, S = backward, A = strafe left,
+        # D = strafe right.
+
+        center_x = self.x + self.width // 2
+        center_y = self.y + self.height // 2
+
+        mouse_x, mouse_y = pygame.mouse.get_pos()
+
+        facing_x = mouse_x - center_x
+        facing_y = mouse_y - center_y
+
+        facing_distance = math.sqrt(
+            facing_x ** 2 + facing_y ** 2
+        )
+
+        if facing_distance > 0:
+            facing_x /= facing_distance
+            facing_y /= facing_distance
+        else:
+            facing_x = 1
+            facing_y = 0
+
+        # Left is perpendicular to the facing direction.
+        left_x = facing_y
+        left_y = -facing_x
+
+        # Right is the opposite perpendicular direction.
+        right_x = -facing_y
+        right_y = facing_x
+
         dx = 0
         dy = 0
+
+        # =================================================
+        # FORWARD
+        # =================================================
+
         if keys[pygame.K_w]:
 
-            dy -= current_speed
+            dx += facing_x * current_speed
+            dy += facing_y * current_speed
 
             self.moving_forward = True
 
@@ -1344,7 +1381,8 @@ class Player:
 
         if keys[pygame.K_s]:
 
-            dy += self.speed
+            dx -= facing_x * self.speed
+            dy -= facing_y * self.speed
 
             self.moving_backward = True
 
@@ -1354,7 +1392,8 @@ class Player:
 
         if keys[pygame.K_a]:
 
-            dx -= self.speed
+            dx += left_x * self.speed
+            dy += left_y * self.speed
 
             self.moving_left = True
 
@@ -1364,7 +1403,8 @@ class Player:
 
         if keys[pygame.K_d]:
 
-            dx += self.speed
+            dx += right_x * self.speed
+            dy += right_y * self.speed
 
             self.moving_right = True
 

@@ -4,6 +4,7 @@ import random
 import time
 import os
 import heapq
+from collections import deque
 
 
 class Enemy:
@@ -38,9 +39,13 @@ class Enemy:
         )
 
 
-        self.speed = 1.0
+        self.speed = 1.3
 
         self.alive = True
+
+        # Only the enemy selected by main.py is allowed to chase/attack.
+        self.active = False
+
         self.health = 30
 
 
@@ -554,6 +559,49 @@ class Enemy:
 
 
     # =========================================================
+    # ACTIVE ENEMY STATE
+    # =========================================================
+
+    def set_active(self, active):
+
+        self.active = active
+
+        # Inactive enemies must never keep an old route.
+        if not active:
+            self.path = []
+            self.path_index = 0
+            self.force_new_path = False
+            self.stuck_time = 0.0
+
+            self.current_feet_animation = self.feet_idle_frames
+            self.weapon_animation = self.weapon_idle_frames
+            self.current_frame = 0
+            self.feet_frame = 0
+
+    # =========================================================
+    # SET NAVIGATION BOUNDS
+    # =========================================================
+
+    def set_navigation_bounds(
+        self,
+        map_left,
+        map_top,
+        map_right,
+        map_bottom
+    ):
+
+        self.map_left = float(map_left)
+        self.map_top = float(map_top)
+        self.map_right = float(map_right)
+        self.map_bottom = float(map_bottom)
+
+        # Force the next active navigation update to use the new bounds.
+        self.path = []
+        self.path_index = 0
+        self.force_new_path = True
+
+
+    # =========================================================
     # SET WEAPON
     # =========================================================
 
@@ -745,78 +793,20 @@ class Enemy:
 # =========================================================
 
     def update_navigation_bounds(
-      self,
-      player,
-      obstacles
-   ):
+        self,
+        player=None,
+        obstacles=None
+    ):
+        """Legacy compatibility method.
 
-    # Start with the current enemy/player area.
-      left = min(
-        self.x,
-        player.x
-     )
-
-      top = min(
-        self.y,
-        player.y
-     )
-
-      right = max(
-        self.x + self.width,
-        player.x + player.width
-     )
-
-      bottom = max(
-        self.y + self.height,
-        player.y + player.height
-     )
+        Navigation bounds are now supplied by main.py from the actual
+        scaled Tiled map. We intentionally do not calculate bounds from
+        the current player/enemy positions because that makes the A* grid
+        move around during gameplay.
+        """
+        return
 
 
-    # Expand bounds using actual scaled obstacle coordinates.
-      for obstacle in obstacles:
-
-         left = min(
-            left,
-            obstacle.rect.left
-         )
-
-         top = min(
-            top,
-            obstacle.rect.top
-         )
-
-         right = max(
-            right,
-            obstacle.rect.right
-         )
-
-         bottom = max(
-             bottom,
-            obstacle.rect.bottom
-         )
-
-
-    # Add navigation padding around the actual map objects.
-      padding = 150
-
-
-      self.map_left = (
-        left - padding
-      )
-
-      self.map_top = (
-        top - padding
-      )
-
-      self.map_right = (
-        right + padding
-      )
-
-      self.map_bottom = (
-        bottom + padding
-      )
-    
-    
     def world_to_grid(
         self,
         x,
@@ -927,9 +917,9 @@ class Enemy:
             return start_cell
 
 
-        queue = [
+        queue = deque([
             start_cell
-        ]
+        ])
 
         visited = {
             start_cell
@@ -947,7 +937,7 @@ class Enemy:
 
         while queue:
 
-            current = queue.pop(0)
+            current = queue.popleft()
 
 
             for dx, dy in directions:
@@ -1319,12 +1309,10 @@ class Enemy:
         obstacles
     ):
 
-        current_time = time.time()
+        if not self.alive or not self.active:
+            return
 
-        self.update_navigation_bounds(
-            player,
-            obstacles
-        )
+        current_time = time.time()
 
         if(
             not self.force_new_path
@@ -1374,16 +1362,9 @@ class Enemy:
 
             should_recalculate = True
 
-        elif (
-
-            current_time -
-            self.last_path_time
-            >=
-            self.path_recalculate_delay
-
-        ):
-
-            should_recalculate = True
+        # Do not rebuild A* just because a timer expired.
+        # Recalculate only when the path is missing, the target grid
+        # cell changed, or movement explicitly requested a new route.
         if not should_recalculate:
             return 
         self.path = (
@@ -1416,6 +1397,9 @@ class Enemy:
         self,
         player
     ):
+
+        if not self.alive or not self.active:
+            return False
 
         if self.current_weapon == "knife":
             return False
@@ -1603,6 +1587,9 @@ class Enemy:
 
     def reload(self):
 
+        if not self.alive or not self.active:
+            return False
+
         if self.current_weapon == "knife":
             return False
 
@@ -1647,6 +1634,9 @@ class Enemy:
 
     def start_auto_reload_if_needed(self):
 
+        if not self.alive or not self.active:
+            return
+
         if self.current_weapon == "knife":
             return
 
@@ -1690,6 +1680,9 @@ class Enemy:
         self,
         player
     ):
+
+        if not self.alive or not self.active:
+            return False
 
         if (
             self.is_shooting
@@ -1762,7 +1755,7 @@ class Enemy:
         obstacles=None
     ):
 
-        if not self.alive:
+        if not self.alive or not self.active:
             return
 
 
@@ -2186,6 +2179,76 @@ class Enemy:
         self.stuck_time = 0
     
     # =========================================================
+    # TRY MOVEMENT WITH WALL SLIDING
+    # =========================================================
+
+    def try_move_with_slide(
+        self,
+        move_x,
+        move_y,
+        enemies,
+        obstacles
+    ):
+        """Try the requested movement, then slide along obstacles.
+
+        The old movement code could fail both X and Y movement at once
+        when the diagonal movement touched an obstacle. This made the
+        enemy wait for the stuck timer before recovering.
+
+        We first try the full movement, then X-only, then Y-only.
+        If none work, the current path is immediately invalidated.
+        """
+
+        # Full movement
+        new_x = self.x + move_x
+        new_y = self.y + move_y
+
+        if self.can_move_to(
+            new_x,
+            new_y,
+            enemies,
+            obstacles
+        ):
+            self.x = new_x
+            self.y = new_y
+            return True
+
+        # X-only movement: slide vertically along a wall.
+        if abs(move_x) > 0:
+            new_x = self.x + move_x
+
+            if self.can_move_to(
+                new_x,
+                self.y,
+                enemies,
+                obstacles
+            ):
+                self.x = new_x
+                return True
+
+        # Y-only movement: slide horizontally along a wall.
+        if abs(move_y) > 0:
+            new_y = self.y + move_y
+
+            if self.can_move_to(
+                self.x,
+                new_y,
+                enemies,
+                obstacles
+            ):
+                self.y = new_y
+                return True
+
+        # Nothing worked. Do not wait a full second before
+        # requesting a fresh route.
+        self.path = []
+        self.path_index = 0
+        self.force_new_path = True
+
+        return False
+
+
+    # =========================================================
     # MOVE
     # =========================================================
 
@@ -2196,8 +2259,9 @@ class Enemy:
         obstacles=None
     ):
 
-        if not self.alive:
+        if not self.alive or not self.active:
             return
+
         self.check_if_stuck()
 
 
@@ -2243,11 +2307,7 @@ class Enemy:
 
 
         player_distance = math.sqrt(
-
-            dx_to_player ** 2
-
-            +
-
+            dx_to_player ** 2 +
             dy_to_player ** 2
         )
 
@@ -2260,12 +2320,10 @@ class Enemy:
 
         if self.current_weapon != "knife":
 
-            stop_distance = (
-                self.weapon_stats[
-                    self.current_weapon
-                ]["stop_distance"]
-            )
-
+            # Activation happens at 80 px in main.py.
+            # Keep a smaller stop distance so an activated enemy
+            # actually chases before stopping.
+            stop_distance = 60
 
             visible = (
                 self.has_line_of_sight(
@@ -2276,20 +2334,13 @@ class Enemy:
 
 
             if (
-
                 visible
-
                 and
-
-                player_distance <=
-                stop_distance
-
+                player_distance <= stop_distance
             ):
-
 
                 self.path = []
                 self.path_index = 0
-
 
                 self.current_feet_animation = (
                     self.feet_idle_frames
@@ -2322,14 +2373,11 @@ class Enemy:
 
         if len(self.path) > 0:
 
-
             # Skip reached waypoints.
-
             while (
                 self.path_index <
                 len(self.path)
             ):
-
 
                 waypoint_x, waypoint_y = (
                     self.path[
@@ -2337,29 +2385,63 @@ class Enemy:
                     ]
                 )
 
-
                 waypoint_distance = math.sqrt(
-
                     (
                         waypoint_x -
                         enemy_center_x
                     ) ** 2
-
                     +
-
                     (
                         waypoint_y -
                         enemy_center_y
                     ) ** 2
                 )
 
-
                 if waypoint_distance < 8:
+                    self.path_index += 1
+                else:
+                    break
+
+
+            # -------------------------------------------------
+            # WAYPOINT LOOK-AHEAD
+            # -------------------------------------------------
+            # If a later waypoint is directly reachable, skip
+            # the unnecessary intermediate waypoint(s).
+            #
+            # This reduces the small "zig-zag" movement caused
+            # by following every 32 px grid cell.
+            while (
+                self.path_index + 1 <
+                len(self.path)
+            ):
+
+                next_x, next_y = (
+                    self.path[
+                        self.path_index + 1
+                    ]
+                )
+
+                clear_x = (
+                    next_x -
+                    self.width / 2
+                )
+
+                clear_y = (
+                    next_y -
+                    self.height / 2
+                )
+
+                if self.can_move_to(
+                    clear_x,
+                    clear_y,
+                    enemies,
+                    obstacles
+                ):
 
                     self.path_index += 1
 
                 else:
-
                     break
 
 
@@ -2367,7 +2449,6 @@ class Enemy:
                 self.path_index <
                 len(self.path)
             ):
-
 
                 target_x, target_y = (
                     self.path[
@@ -2406,7 +2487,6 @@ class Enemy:
             distance
         ) * self.speed
 
-
         move_y = (
             dy /
             distance
@@ -2423,49 +2503,23 @@ class Enemy:
 
 
         # =====================================================
-        # HORIZONTAL MOVEMENT
+        # COLLISION-AWARE MOVEMENT
         # =====================================================
 
-        new_x = (
-            self.x +
-            move_x
-        )
-
-
-        if self.can_move_to(
-            new_x,
-            self.y,
+        moved = self.try_move_with_slide(
+            move_x,
+            move_y,
             enemies,
             obstacles
-        ):
-
-            self.x = new_x
-
-
-        # =====================================================
-        # VERTICAL MOVEMENT
-        # =====================================================
-
-        new_y = (
-            self.y +
-            move_y
         )
 
-
-        if self.can_move_to(
-            self.x,
-            new_y,
-            enemies,
-            obstacles
-        ):
-
-            self.y = new_y
+        if not moved:
+            # A new path will be requested on the next update.
+            return
 
 
         self.rect.topleft = (
-
             int(self.x),
-
             int(self.y)
         )
 

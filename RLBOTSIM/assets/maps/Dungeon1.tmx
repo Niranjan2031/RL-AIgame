@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<map version="1.10" tiledversion="1.12.2" orientation="orthogonal" renderorder="right-down" width="64" height="48" tilewidth="16" tileheight="16" infinite="0" nextlayerid="41" nextobjectid="312">
+<map version="1.10" tiledversion="1.12.2" orientation="orthogonal" renderorder="right-down" width="64" height="48" tilewidth="16" tileheight="16" infinite="0" nextlayerid="43" nextobjectid="318">
  <tileset firstgid="1" name="cracked_tiles" tilewidth="16" tileheight="16" tilecount="256" columns="8">
   <image source="decorative_cracks_walls.png" width="128" height="512"/>
  </tileset>
@@ -4337,6 +4337,15 @@
    </animation>
   </tile>
  </tileset>
+ <tileset firstgid="6198" name="pickup" tilewidth="256" tileheight="256" tilecount="98" columns="14">
+  <image source="../pickups/Tileset with cell size 256x256.png" width="3648" height="1792"/>
+ </tileset>
+ <tileset firstgid="6296" name="health_pickup" tilewidth="12" tileheight="12" tilecount="1" columns="1">
+  <image source="../pickups/health_pack.png" width="12" height="12"/>
+ </tileset>
+ <tileset firstgid="6297" name="ammo_pickup" tilewidth="12" tileheight="12" tilecount="1" columns="1">
+  <image source="../pickups/ammo_pack.png" width="12" height="12"/>
+ </tileset>
  <objectgroup id="37" name="obstacle">
   <object id="19" x="292.5" y="458.5" width="7.5" height="60"/>
   <object id="20" x="420.5" y="515.5" width="7.5" height="48.5"/>
@@ -4478,6 +4487,16 @@
   <object id="306" x="603.5" y="479">
    <point/>
   </object>
+ </objectgroup>
+ <objectgroup id="41" name="health_pickups">
+  <object id="312" gid="6296" x="466" y="413" width="12" height="12"/>
+  <object id="313" gid="6296" x="689.5" y="385" width="12" height="12"/>
+  <object id="314" gid="6296" x="667" y="533.5" width="12" height="12"/>
+ </objectgroup>
+ <objectgroup id="42" name="ammo_pickups">
+  <object id="315" gid="6297" x="625.5" y="346" width="12" height="12"/>
+  <object id="316" gid="6297" x="769.5" y="390" width="12" height="12"/>
+  <object id="317" gid="6297" x="771" y="430" width="12" height="12"/>
  </objectgroup>
  <objectgroup id="40" name="rl_bot_spawn">
   <object id="310" x="768.5" y="550">

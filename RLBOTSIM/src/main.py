@@ -129,6 +129,20 @@ game_state = "PLAYING"
 
 
 # =====================================================
+# NORMAL ENEMY ACTIVATION SETTINGS
+# =====================================================
+
+# Only ONE normal enemy can be active at a time.
+# An enemy becomes active only when the player is
+# very close to it.
+ENEMY_ACTIVATION_DISTANCE = 80
+ENEMY_DEACTIVATION_DISTANCE = 200
+
+# The currently active normal enemy.
+active_enemy = None
+
+
+# =====================================================
 # PLAYER MELEE SETTINGS
 # =====================================================
 
@@ -192,6 +206,359 @@ def get_map_offset():
         offset_x,
         offset_y
     )
+
+
+# =====================================================
+# GET ACTUAL SCALED MAP BOUNDS
+# =====================================================
+
+def get_map_bounds():
+
+    map_width = (
+        tmx_data.width *
+        tmx_data.tilewidth
+    )
+
+    map_height = (
+        tmx_data.height *
+        tmx_data.tileheight
+    )
+
+    enlarged_width = int(
+        map_width *
+        TILE_SCALE
+    )
+
+    enlarged_height = int(
+        map_height *
+        TILE_SCALE
+    )
+
+    offset_x, offset_y = (
+        get_map_offset()
+    )
+
+    return (
+        offset_x,
+        offset_y,
+        offset_x + enlarged_width,
+        offset_y + enlarged_height
+    )
+
+
+# =====================================================
+# PICKUP SETTINGS
+# =====================================================
+
+HEALTH_PACK_AMOUNT = 15
+
+# The player currently has a magazine-based ammo system.
+# An ammo pickup refills the currently equipped weapon's
+# magazine to its maximum capacity.
+#
+# Pickups are NOT added to the obstacle list and are NOT
+# considered by enemy A* navigation.
+
+PICKUP_SOURCE_SIZE = 8
+
+
+# =====================================================
+# LOAD PICKUP SPRITES
+# =====================================================
+
+pickup_folder = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "assets",
+    "pickups"
+)
+
+
+def load_pickup_image(filename):
+
+    image_path = os.path.join(
+        pickup_folder,
+        filename
+    )
+
+    if not os.path.exists(image_path):
+
+        print(
+            "WARNING: Pickup image not found:",
+            image_path
+        )
+
+        return None
+
+    image = pygame.image.load(
+        image_path
+    ).convert_alpha()
+
+    # Keep the tiny pixel-art pickup size consistent
+    # with the 8x8 pickup sprites prepared for the map.
+    display_size = max(
+        1,
+        int(PICKUP_SOURCE_SIZE * TILE_SCALE)
+    )
+
+    image = pygame.transform.scale(
+        image,
+        (
+            display_size,
+            display_size
+        )
+    )
+
+    return image
+
+
+health_pack_image = load_pickup_image(
+    "health_pack.png"
+)
+
+ammo_pack_image = load_pickup_image(
+    "ammo_pack.png"
+)
+
+
+# =====================================================
+# LOAD PICKUP POSITIONS FROM TILED
+# =====================================================
+
+def load_pickup_points(layer_name):
+
+    pickup_points = []
+
+    try:
+
+        pickup_layer = (
+            tmx_data.get_layer_by_name(
+                layer_name
+            )
+        )
+
+    except ValueError:
+
+        print(
+            f"WARNING: {layer_name} layer not found!"
+        )
+
+        return pickup_points
+
+    offset_x, offset_y = (
+        get_map_offset()
+    )
+
+    for obj in pickup_layer:
+
+        pickup_x = (
+            offset_x +
+            obj.x *
+            TILE_SCALE
+        )
+
+        pickup_y = (
+            offset_y +
+            obj.y *
+            TILE_SCALE
+        )
+
+        pickup_points.append(
+            (
+                pickup_x,
+                pickup_y
+            )
+        )
+
+    print(
+        f"{layer_name} loaded:",
+        len(pickup_points)
+    )
+
+    return pickup_points
+
+
+health_pickup_positions = (
+    load_pickup_points(
+        "health_pickups"
+    )
+)
+
+ammo_pickup_positions = (
+    load_pickup_points(
+        "ammo_pickups"
+    )
+)
+
+
+# =====================================================
+# CREATE ACTIVE PICKUPS
+# =====================================================
+
+health_pickups = []
+
+for x, y in health_pickup_positions:
+
+    health_pickups.append(
+        {
+            "x": x,
+            "y": y,
+            "collected": False
+        }
+    )
+
+
+ammo_pickups = []
+
+for x, y in ammo_pickup_positions:
+
+    ammo_pickups.append(
+        {
+            "x": x,
+            "y": y,
+            "collected": False
+        }
+    )
+
+
+# =====================================================
+# DRAW PICKUPS
+# =====================================================
+
+def draw_pickups(screen):
+
+    if health_pack_image is not None:
+
+        for pickup in health_pickups:
+
+            if pickup["collected"]:
+                continue
+
+            screen.blit(
+                health_pack_image,
+                (
+                    int(pickup["x"]),
+                    int(pickup["y"])
+                )
+            )
+
+    if ammo_pack_image is not None:
+
+        for pickup in ammo_pickups:
+
+            if pickup["collected"]:
+                continue
+
+            screen.blit(
+                ammo_pack_image,
+                (
+                    int(pickup["x"]),
+                    int(pickup["y"])
+                )
+            )
+
+
+# =====================================================
+# CHECK PLAYER PICKUPS
+# =====================================================
+
+def update_pickups():
+
+    player_rect = pygame.Rect(
+        int(player.x),
+        int(player.y),
+        player.width,
+        player.height
+    )
+
+    # ---------------------------------------------
+    # HEALTH PICKUPS
+    # ---------------------------------------------
+
+    if player.health < 30:
+
+        for pickup in health_pickups:
+
+            if pickup["collected"]:
+                continue
+
+            pickup_rect = pygame.Rect(
+                int(pickup["x"]),
+                int(pickup["y"]),
+                max(
+                    1,
+                    int(PICKUP_SOURCE_SIZE * TILE_SCALE)
+                ),
+                max(
+                    1,
+                    int(PICKUP_SOURCE_SIZE * TILE_SCALE)
+                )
+            )
+
+            if player_rect.colliderect(
+                pickup_rect
+            ):
+
+                old_health = player.health
+
+                player.health = min(
+                    30,
+                    player.health +
+                    HEALTH_PACK_AMOUNT
+                )
+
+                pickup["collected"] = True
+
+                print(
+                    "Health pickup collected:",
+                    f"{old_health} -> {player.health}"
+                )
+
+                # Only collect one pickup per update.
+                break
+
+
+    # ---------------------------------------------
+    # AMMO PICKUPS
+    # ---------------------------------------------
+
+    if player.current_weapon != "knife":
+
+        for pickup in ammo_pickups:
+
+            if pickup["collected"]:
+                continue
+
+            pickup_rect = pygame.Rect(
+                int(pickup["x"]),
+                int(pickup["y"]),
+                max(
+                    1,
+                    int(PICKUP_SOURCE_SIZE * TILE_SCALE)
+                ),
+                max(
+                    1,
+                    int(PICKUP_SOURCE_SIZE * TILE_SCALE)
+                )
+            )
+
+            if player_rect.colliderect(
+                pickup_rect
+            ):
+
+                old_ammo = player.ammo
+
+                player.ammo = player.max_ammo
+
+                pickup["collected"] = True
+
+                print(
+                    "Ammo pickup collected:",
+                    f"{old_ammo} -> {player.ammo}"
+                )
+
+                # Only collect one pickup per update.
+                break
 
 
 # =====================================================
@@ -343,6 +710,147 @@ rl_bot_spawn_point = (
 
 
 # =====================================================
+# FIND VALID ENEMY SPAWN POSITION
+# =====================================================
+
+def find_valid_enemy_spawn(
+    spawn_x,
+    spawn_y,
+    existing_enemies
+):
+
+    enemy_width = 40
+    enemy_height = 40
+
+    # Tiled spawn points represent the top-left position
+    # used by Enemy(), so test the same 40x40 body.
+    def is_valid_position(x, y):
+
+        test_rect = pygame.Rect(
+            int(x),
+            int(y),
+            enemy_width,
+            enemy_height
+        )
+
+        # Keep the complete enemy body inside the map.
+        if (
+            test_rect.left < map_left
+            or test_rect.top < map_top
+            or test_rect.right > map_right
+            or test_rect.bottom > map_bottom
+        ):
+
+            return False
+
+        # Enemy must not overlap any obstacle.
+        for obstacle in obstacles:
+
+            if test_rect.colliderect(
+                obstacle.rect
+            ):
+
+                return False
+
+        # Enemy must not spawn on top of another enemy.
+        for other in existing_enemies:
+
+            if not other.alive:
+                continue
+
+            other_rect = pygame.Rect(
+                int(other.x),
+                int(other.y),
+                other.width,
+                other.height
+            )
+
+            if test_rect.colliderect(
+                other_rect
+            ):
+
+                return False
+
+        return True
+
+
+    # First try the exact Tiled spawn position.
+    if is_valid_position(
+        spawn_x,
+        spawn_y
+    ):
+
+        return (
+            spawn_x,
+            spawn_y
+        )
+
+
+    # If the Tiled point is blocked, search outward
+    # in increasing distances for the nearest free spot.
+    search_step = 16
+    max_search_radius = 256
+
+    for radius in range(
+        search_step,
+        max_search_radius + search_step,
+        search_step
+    ):
+
+        # Check points around the original spawn.
+        offsets = [
+            (0, -radius),
+            (radius, 0),
+            (0, radius),
+            (-radius, 0),
+
+            (radius, -radius),
+            (radius, radius),
+            (-radius, radius),
+            (-radius, -radius)
+        ]
+
+        for offset_x, offset_y in offsets:
+
+            candidate_x = (
+                spawn_x +
+                offset_x
+            )
+
+            candidate_y = (
+                spawn_y +
+                offset_y
+            )
+
+            if is_valid_position(
+                candidate_x,
+                candidate_y
+            ):
+
+                print(
+                    "Spawn point blocked. "
+                    "Moved enemy to nearest valid position:",
+                    int(candidate_x),
+                    int(candidate_y)
+                )
+
+                return (
+                    candidate_x,
+                    candidate_y
+                )
+
+
+    # No nearby valid position was found.
+    print(
+        "WARNING: No valid spawn position found near:",
+        int(spawn_x),
+        int(spawn_y)
+    )
+
+    return None
+
+
+# =====================================================
 # SPAWN ENEMIES
 # =====================================================
 
@@ -355,7 +863,7 @@ def spawn_wave_enemies(
 
     # -------------------------------------------------
     # If there are no Tiled spawn points,
-    # use the Enemy fallback random spawn.
+    # use fallback positions, but validate them too.
     # -------------------------------------------------
 
     if len(enemy_spawn_points) == 0:
@@ -364,12 +872,45 @@ def spawn_wave_enemies(
             "No enemy spawn points found."
         )
 
-        for i in range(
-            enemy_amount
+        attempts = 0
+        max_attempts = enemy_amount * 50
+
+        while (
+            len(new_enemies) < enemy_amount
+            and
+            attempts < max_attempts
         ):
 
+            attempts += 1
+
+            fallback_x = random.randint(
+                int(map_left),
+                int(map_right - 40)
+            )
+
+            fallback_y = random.randint(
+                int(map_top),
+                int(map_bottom - 40)
+            )
+
+            valid_position = (
+                find_valid_enemy_spawn(
+                    fallback_x,
+                    fallback_y,
+                    new_enemies
+                )
+            )
+
+            if valid_position is None:
+                continue
+
+            spawn_x, spawn_y = valid_position
+
             new_enemies.append(
-                Enemy()
+                Enemy(
+                    spawn_x,
+                    spawn_y
+                )
             )
 
 
@@ -395,11 +936,9 @@ def spawn_wave_enemies(
 
     else:
 
-        # If more enemies than spawn points,
-        # reuse spawn points.
-
+        # If there are fewer Tiled spawn points than
+        # enemies, reuse spawn points.
         selected_spawns = []
-
 
         for i in range(
             enemy_amount
@@ -413,18 +952,28 @@ def spawn_wave_enemies(
 
 
     # -------------------------------------------------
-    # CREATE ENEMIES
+    # CREATE ENEMIES AT VALID POSITIONS
     # -------------------------------------------------
 
-    for spawn_x, spawn_y in (
-        selected_spawns
-    ):
+    for spawn_x, spawn_y in selected_spawns:
 
-        enemy = Enemy(
-            spawn_x,
-            spawn_y
+        valid_position = (
+            find_valid_enemy_spawn(
+                spawn_x,
+                spawn_y,
+                new_enemies
+            )
         )
 
+        if valid_position is None:
+            continue
+
+        valid_x, valid_y = valid_position
+
+        enemy = Enemy(
+            valid_x,
+            valid_y
+        )
 
         new_enemies.append(
             enemy
@@ -462,13 +1011,9 @@ enemy_count = (
 )
 
 
-# Spawn Wave 1
-
-enemies = (
-    spawn_wave_enemies(
-        enemy_count
-    )
-)
+# Enemies are spawned after the obstacle layer is loaded
+# so their complete 40x40 body can be checked against it.
+enemies = []
 
 
 # =====================================================
@@ -940,6 +1485,175 @@ obstacles = load_obstacles(
 
 
 # =====================================================
+# SET ACTUAL MAP BOUNDS FOR ALL ENEMIES
+# =====================================================
+
+map_left, map_top, map_right, map_bottom = (
+    get_map_bounds()
+)
+
+# =====================================================
+# SPAWN WAVE 1
+# =====================================================
+
+enemies = spawn_wave_enemies(
+    enemy_count
+)
+
+
+for enemy in enemies:
+
+    enemy.set_navigation_bounds(
+        map_left,
+        map_top,
+        map_right,
+        map_bottom
+    )
+
+
+# =====================================================
+# FIND THE ONE ACTIVE ENEMY
+# =====================================================
+
+def update_active_enemy():
+
+    global active_enemy
+
+    # -------------------------------------------------
+    # If the current active enemy died, release it.
+    # -------------------------------------------------
+
+    if (
+        active_enemy is not None
+        and not active_enemy.alive
+    ):
+
+        active_enemy.set_active(False)
+        active_enemy = None
+
+
+    # -------------------------------------------------
+    # If the current active enemy is still close
+    # enough, keep it active.
+    # -------------------------------------------------
+
+    if active_enemy is not None:
+
+        enemy_center_x = (
+            active_enemy.x +
+            active_enemy.width / 2
+        )
+
+        enemy_center_y = (
+            active_enemy.y +
+            active_enemy.height / 2
+        )
+
+        player_center_x = (
+            player.x +
+            player.width / 2
+        )
+
+        player_center_y = (
+            player.y +
+            player.height / 2
+        )
+
+        dx = (
+            enemy_center_x -
+            player_center_x
+        )
+
+        dy = (
+            enemy_center_y -
+            player_center_y
+        )
+
+        distance = math.sqrt(
+            dx ** 2 +
+            dy ** 2
+        )
+
+        # Keep the active enemy while the player remains
+        # within the activation distance.
+        if distance <= ENEMY_DEACTIVATION_DISTANCE:
+
+            return
+
+        # Player moved away, so release this enemy.
+        active_enemy.set_active(False)
+        active_enemy = None
+
+
+    # -------------------------------------------------
+    # Find the closest eligible enemy.
+    # -------------------------------------------------
+
+    closest_enemy = None
+    closest_distance = float("inf")
+
+    player_center_x = (
+        player.x +
+        player.width / 2
+    )
+
+    player_center_y = (
+        player.y +
+        player.height / 2
+    )
+
+    for enemy in enemies:
+
+        if not enemy.alive:
+            continue
+
+        enemy_center_x = (
+            enemy.x +
+            enemy.width / 2
+        )
+
+        enemy_center_y = (
+            enemy.y +
+            enemy.height / 2
+        )
+
+        dx = (
+            enemy_center_x -
+            player_center_x
+        )
+
+        dy = (
+            enemy_center_y -
+            player_center_y
+        )
+
+        distance = math.sqrt(
+            dx ** 2 +
+            dy ** 2
+        )
+
+        if (
+            distance <= ENEMY_ACTIVATION_DISTANCE
+            and
+            distance < closest_distance
+        ):
+
+            closest_enemy = enemy
+            closest_distance = distance
+
+
+    # -------------------------------------------------
+    # Activate ONLY the closest enemy.
+    # -------------------------------------------------
+
+    if closest_enemy is not None:
+
+        active_enemy = closest_enemy
+
+        active_enemy.set_active(True)
+
+
+# =====================================================
 # MAIN LOOP
 # =====================================================
 
@@ -1289,6 +2003,12 @@ while running:
         tmx_data
     )
 
+    # Pickups are visual/gameplay objects only.
+    # They are never passed to enemy navigation.
+    draw_pickups(
+        screen
+    )
+
 
     # =================================================
     # PLAYING
@@ -1402,6 +2122,10 @@ while running:
             obstacles
         )
 
+        # Pickups interact only with the player.
+        # They do not modify obstacles or enemy navigation.
+        update_pickups()
+
 
         # =============================================
         # CHECK PLAYER HEALTH
@@ -1422,9 +2146,13 @@ while running:
             screen
         )
 
-        player.aim(
-            screen
-        )
+
+
+        # =============================================
+        # UPDATE THE ONE ACTIVE NORMAL ENEMY
+        # =============================================
+
+        update_active_enemy()
 
 
         # =============================================
@@ -1438,36 +2166,46 @@ while running:
                 continue
 
 
-            enemy.update_combat(
-                player,obstacles
-            )
+            # Only the active enemy is allowed to
+            # navigate and attack.
+            if enemy is active_enemy:
 
-
-            enemy.move(
-                player,
-                enemies,
-                obstacles
-            )
-
-
-            pending_shots = (
-                enemy.get_pending_shots()
-            )
-
-
-            for shot in pending_shots:
-
-                enemy_bullets.append(
-
-                    Bullet(
-                        shot["x"],
-                        shot["y"],
-                        shot["target_x"],
-                        shot["target_y"],
-                        damage=shot["damage"],
-                        owner="enemy"
-                    )
+                enemy.update_combat(
+                    player,
+                    obstacles
                 )
+
+
+                enemy.move(
+                    player,
+                    enemies,
+                    obstacles
+                )
+
+
+                pending_shots = (
+                    enemy.get_pending_shots()
+                )
+
+
+                for shot in pending_shots:
+
+                    enemy_bullets.append(
+
+                        Bullet(
+                            shot["x"],
+                            shot["y"],
+                            shot["target_x"],
+                            shot["target_y"],
+                            damage=shot["damage"],
+                            owner="enemy"
+                        )
+                    )
+
+            else:
+
+                # Keep inactive enemies completely idle.
+                enemy.set_active(False)
 
 
             enemy.draw(
@@ -1722,12 +2460,26 @@ while running:
 
                 enemy_bullets.clear()
 
+                active_enemy = None
+
 
                 enemies = (
                     spawn_wave_enemies(
                         enemy_count
                     )
                 )
+
+
+                # Give the new wave the actual scaled
+                # Tiled map bounds.
+                for new_enemy in enemies:
+
+                    new_enemy.set_navigation_bounds(
+                        map_left,
+                        map_top,
+                        map_right,
+                        map_bottom
+                    )
 
 
             # -----------------------------------------

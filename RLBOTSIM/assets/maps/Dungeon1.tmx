@@ -4499,7 +4499,7 @@
   <object id="317" gid="6297" x="771" y="430" width="12" height="12"/>
  </objectgroup>
  <objectgroup id="40" name="rl_bot_spawn">
-  <object id="310" x="768.5" y="550">
+  <object id="310" x="752" y="534.5">
    <point/>
   </object>
   <object id="311" x="801.5" y="395">

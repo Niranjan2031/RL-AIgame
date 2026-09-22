@@ -121,12 +121,63 @@ class DQNAgent:
     # ---------------------------------------------------------
 
     def choose_action(self, state, training=True):
+        if self.state_size == 34 and len(state) != 34:
+            raise ValueError(f"Expected 34 observations, got {len(state)}.")
+
+        # -----------------------------------------------------
+        # EPSILON EXPLORATION
+        # -----------------------------------------------------
+        #
+        # Observation 30 is the 75 px knife-range flag in the final 34-state contract.
+        #
+        # The original explorer selected all 9 actions with
+        # equal probability. Because close-range encounters are
+        # relatively short, action 8 (MELEE) could receive too
+        # few useful training transitions before epsilon became
+        # small.
+        #
+        # When the bot is actually inside knife range, increase
+        # the chance of exploring MELEE. This only affects
+        # epsilon-random training actions.
+        #
+        # IMPORTANT:
+        # - It does NOT force MELEE during exploitation.
+        # - It does NOT change the network architecture.
+        # - It does NOT change evaluation when epsilon = 0.
+        # -----------------------------------------------------
 
         if training and random.random() < self.epsilon:
+
+            close_range = (
+                len(state) > 30
+                and float(state[30]) >= 0.5
+            )
+
+            if close_range and self.action_size >= 9:
+
+                # 40% of exploratory close-range actions are
+                # deliberately MELEE. The remaining 60% explore
+                # the other actions normally.
+                if random.random() < 0.40:
+                    return 8
+
+                other_actions = [
+                    action
+                    for action in range(self.action_size)
+                    if action != 8
+                ]
+
+                return random.choice(
+                    other_actions
+                )
 
             return random.randrange(
                 self.action_size
             )
+
+        # -----------------------------------------------------
+        # EXPLOITATION
+        # -----------------------------------------------------
 
         state_tensor = torch.tensor(
             state,

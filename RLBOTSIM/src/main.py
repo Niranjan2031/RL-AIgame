@@ -2069,16 +2069,15 @@ rl_env_2 = TacticalShooterEnv()
 # -----------------------------------------------------
 # TRAINED DQN FOR RL BOT 1
 # -----------------------------------------------------
-# The game automatically uses the trained 24-observation
-# Bot 1 model when it exists. If no compatible model is
-# available yet, Bot 1 falls back to the temporary policy
-# so the game remains playable while training is in progress.
+# The game uses the trained 34-observation / 9-action
+# Bot 1 DQN model. The trained model is required for Bot 1;
+# there is NO silent fallback to the temporary policy.
 
 RL_BOT_1_MODEL_PATH = os.path.join(
     os.path.dirname(__file__),
     "..",
     "models",
-    "rl_bot_1_dqn_headless_final.pt"
+    "rl_bot_1_dqn_final.pt"
 )
 
 rl_bot_1_dqn = None
@@ -2088,48 +2087,51 @@ def load_rl_bot_1_dqn():
     global rl_bot_1_dqn
 
     if not os.path.exists(RL_BOT_1_MODEL_PATH):
-        print(
-            "RL Bot 1 DQN model not found. "
-            "Using temporary policy until training is complete."
+        raise FileNotFoundError(
+            "RL Bot 1 DQN model was not found: "
+            f"{os.path.abspath(RL_BOT_1_MODEL_PATH)}"
         )
-        return
+
+    # Final model contract:
+    #   state_size = 34
+    #   action_size = 9
+    rl_bot_1_dqn = DQNAgent(
+        state_size=34,
+        action_size=9,
+        batch_size=64
+    )
 
     try:
-        rl_bot_1_dqn = DQNAgent(
-            state_size=24,
-            action_size=13,
-            batch_size=64
-        )
-
         rl_bot_1_dqn.load(
             RL_BOT_1_MODEL_PATH,
             training=False
         )
-
-        rl_bot_1_dqn.epsilon = 0.0
-
-        print(
-            "RL Bot 1 DQN loaded:",
-            RL_BOT_1_MODEL_PATH
-        )
-        print(
-            "RL Bot 1 DQN device:",
-            rl_bot_1_dqn.device
-        )
-
     except Exception as exc:
         rl_bot_1_dqn = None
-        print(
-            "WARNING: Could not load RL Bot 1 DQN:",
-            exc
-        )
-        print(
-            "Using temporary policy until a compatible "
-            "24-observation model is trained."
-        )
+        raise RuntimeError(
+            "RL Bot 1 DQN model could not be loaded. "
+            "The model must be the 34-state / 9-action model. "
+            f"Original error: {exc}"
+        ) from exc
+
+    # Deterministic inference in the actual game.
+    rl_bot_1_dqn.epsilon = 0.0
+
+    print(
+        "RL Bot 1 DQN loaded:",
+        os.path.abspath(RL_BOT_1_MODEL_PATH)
+    )
+    print(
+        "RL Bot 1 DQN device:",
+        rl_bot_1_dqn.device
+    )
+    print(
+        "RL Bot 1 DQN contract: 34 observations / 9 actions"
+    )
 
 
-#load_rl_bot_1_dqn()
+# Load the trained 34-state model immediately at startup.
+load_rl_bot_1_dqn()
 
 
 def create_rl_bot(
@@ -2256,15 +2258,18 @@ def create_rl_bot_bullet(
 ):
 
     if bot is None or not bot.alive:
-
         return
+
+    # IMPORTANT:
+    # TacticalShooterEnv already calls bot.shoot() and only
+    # invokes this callback when that shot was successfully
+    # fired. Calling bot.shoot() again here would consume a
+    # second round / fail because of the cooldown and could
+    # prevent the actual bullet from being created.
+    #
+    # This callback ONLY creates the real PyGame bullet.
 
     if bot.current_weapon == "knife":
-
-        return
-
-    if not bot.shoot():
-
         return
 
     bot_center_x, bot_center_y = (
@@ -2341,9 +2346,9 @@ def rl_bot_melee_attack(
     ):
         return False
 
-    if not bot.melee_attack():
-        return False
-
+    # TacticalShooterEnv already executed bot.melee()
+    # before calling this callback. Do NOT call melee_attack()
+    # again here because that would trigger the action twice.
     rl_bot_last_melee[
         bot_number
     ] = current_time
@@ -2464,9 +2469,10 @@ def update_rl_bot(
     # is available. Bot 2 remains on the temporary policy
     # until its own stronger model is trained.
     #
-    # The DQN receives the exact 24-observation contract:
-    # 16 combat/resource observations + 8-direction
-    # obstacle clearance.
+    # The DQN receives the exact final 34-observation contract:
+    # 24 original observations + enemy velocity (2) + pickup
+    # direction (4) + combat-range flags (4).
+    # Action space is exactly 9 actions (0-8).
     # -------------------------------------------------
 
     if (
@@ -2477,21 +2483,106 @@ def update_rl_bot(
         if not hasattr(bot, "last_rl_observation"):
             observation, _ = env.reset()
             bot.last_rl_observation = observation
+            bot.last_rl_action = 0
 
-        action = rl_bot_1_dqn.select_action(
-            bot.last_rl_observation,
-            training=False
-        )
+        # -------------------------------------------------
+        # RL25 DECISION FREQUENCY
+        # -------------------------------------------------
+        #
+        # The game renders at 60 FPS, but RL25 makes one
+        # decision every 0.1 s = 6 frames.
+        #
+        # Do NOT run DQN inference every rendered frame.
+        # Between decision frames, keep the previous action.
+        # This avoids unnecessary inference overhead and
+        # removes a major source of visible stutter.
+        # -------------------------------------------------
+
+        if env.needs_new_action():
+
+            action = rl_bot_1_dqn.choose_action(
+                bot.last_rl_observation,
+                training=False
+            )
+
+            bot.last_rl_action = int(action)
+
+            # -------------------------------------------------
+            # RL DEBUG OUTPUT
+            # -------------------------------------------------
+            # Print ONLY when the DQN makes a new decision,
+            # not every rendered frame. This lets us check
+            # whether the bot is actually choosing an attack
+            # when the player gets close.
+            #
+            # Action mapping:
+            #   0 = IDLE
+            #   1 = FORWARD
+            #   2 = BACKWARD
+            #   3 = LEFT
+            #   4 = RIGHT
+            #   5 = SPRINT
+            #   6 = SHOOT
+            #   7 = RELOAD
+            #   8 = MELEE
+            # -------------------------------------------------
+
+            try:
+                debug_distance = env._distance_to_player()
+            except Exception:
+                debug_distance = float("nan")
+
+            debug_action_names = {
+                0: "IDLE",
+                1: "FORWARD",
+                2: "BACKWARD",
+                3: "LEFT",
+                4: "RIGHT",
+                5: "SPRINT",
+                6: "SHOOT",
+                7: "RELOAD",
+                8: "MELEE"
+            }
+
+            debug_action_name = debug_action_names.get(
+                int(action),
+                "UNKNOWN"
+            )
+
+            print(
+                f"RL DECISION | "
+                f"distance={debug_distance:.1f} | "
+                f"action={int(action)} "
+                f"({debug_action_name}) | "
+                f"weapon={bot.current_weapon} | "
+                f"health={bot.health:.1f} | "
+                f"player_health={player.health:.1f}"
+            )
+
+        else:
+
+            action = getattr(
+                bot,
+                "last_rl_action",
+                0
+            )
 
     else:
 
-        # Temporary fallback controller.
+        # Bot 2 still uses the temporary rule-based controller.
+        # Bot 1 must always use the trained 34-state DQN.
         action = bot.choose_action(
             player,
             obstacles,
             health_pickups,
             ammo_pickups
         )
+
+    # Advance the RL bot's own timers once per rendered frame.
+    # main.py previously did not call RLBot.update(), so a
+    # successful shot could leave shoot_cooldown/reload_timer
+    # stuck forever.
+    bot.update(1.0 / 60.0)
 
     (
         observation,

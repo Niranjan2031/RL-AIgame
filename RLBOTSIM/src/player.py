@@ -1441,6 +1441,10 @@ class Player:
         if not collision:
             self.y += dy
 
+        # Hard screen boundary.
+        # This is independent of map/obstacle boundaries.
+        self.clamp_to_screen()
+
         # Update rectangle
         self.rect.topleft = (self.x, self.y)
         # =================================================
@@ -1567,6 +1571,37 @@ class Player:
                 self.feet_animation = (
                     self.feet_idle_frames
                 )
+
+
+    # =========================================================
+    # SCREEN BOUNDARY
+    # =========================================================
+    # Hard game rule: the complete player body must remain
+    # inside the visible Pygame screen.
+    # =========================================================
+
+    def clamp_to_screen(self, screen_width=1000, screen_height=700):
+
+        self.x = max(
+            0.0,
+            min(
+                float(self.x),
+                float(screen_width - self.width)
+            )
+        )
+
+        self.y = max(
+            0.0,
+            min(
+                float(self.y),
+                float(screen_height - self.height)
+            )
+        )
+
+        self.rect.topleft = (
+            int(self.x),
+            int(self.y)
+        )
 
     # =========================================================
     # AIM LINE

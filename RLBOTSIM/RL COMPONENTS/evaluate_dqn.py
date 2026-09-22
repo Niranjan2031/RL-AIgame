@@ -36,15 +36,15 @@ from dqn_agent import DQNAgent
 
 
 # ============================================================
-# RL25 CONFIGURATION
+# FINAL DQN CONFIGURATION
 # ============================================================
 
-STATE_SIZE = 28
+STATE_SIZE = 34
 ACTION_SIZE = 9
 
-NUM_EPISODES = 100
+NUM_EPISODES = 30
 
-MODEL_NAME = "rl_bot_1_dqn_rl25_final.pt"
+MODEL_NAME = "rl_bot_1_dqn_final.pt"
 
 
 # ============================================================
@@ -83,7 +83,7 @@ def main():
 
     print()
     print("=" * 65)
-    print("RL25 DQN EVALUATION")
+    print("DQN EVALUATION")
     print("=" * 65)
 
     print(
@@ -112,7 +112,7 @@ def main():
     if not os.path.exists(MODEL_PATH):
 
         print(
-            "ERROR: RL25 model was not found."
+            "ERROR: DQN model was not found."
         )
 
         print()
@@ -196,7 +196,7 @@ def main():
 
     print()
     print(
-        "Loading RL25 model..."
+        "Loading DQN model..."
     )
 
     agent.load(
@@ -225,6 +225,11 @@ def main():
     shots_hit = []
 
     weapon_switches = []
+    melee_attempts = []
+    melee_hits = []
+    health_pickups = []
+    ammo_pickups = []
+    enemies_defeated = []
 
     action_counts = {
         action: 0
@@ -249,6 +254,14 @@ def main():
 
         episode_reward = 0.0
         episode_length = 0
+
+        # damage_dealt and damage_taken in the environment
+        # are per-step values, while shots and weapon_switches
+        # are cumulative episode counters. Accumulate damage
+        # across the episode instead of reading only the final
+        # step.
+        episode_damage_dealt = 0.0
+        episode_damage_taken = 0.0
 
         terminated = False
         truncated = False
@@ -288,6 +301,20 @@ def main():
             episode_reward += reward
             episode_length += 1
 
+            episode_damage_dealt += float(
+                info.get(
+                    "damage_dealt",
+                    0.0
+                )
+            )
+
+            episode_damage_taken += float(
+                info.get(
+                    "damage_taken",
+                    0.0
+                )
+            )
+
             if episode_length >= 3000:
 
                 break
@@ -304,15 +331,8 @@ def main():
             episode_length
         )
 
-        current_damage_dealt = info.get(
-            "damage_dealt",
-            0.0
-        )
-
-        current_damage_taken = info.get(
-            "damage_taken",
-            0.0
-        )
+        current_damage_dealt = episode_damage_dealt
+        current_damage_taken = episode_damage_taken
 
         current_shots_fired = info.get(
             "shots_fired",
@@ -326,6 +346,31 @@ def main():
 
         current_weapon_switches = info.get(
             "weapon_switches",
+            0
+        )
+
+        current_melee_attempts = info.get(
+            "melee_attempts",
+            0
+        )
+
+        current_melee_hits = info.get(
+            "melee_hits",
+            0
+        )
+
+        current_health_pickups = info.get(
+            "health_pickups_collected",
+            0
+        )
+
+        current_ammo_pickups = info.get(
+            "ammo_pickups_collected",
+            0
+        )
+
+        current_enemies_defeated = info.get(
+            "enemies_defeated",
             0
         )
 
@@ -349,6 +394,26 @@ def main():
             current_weapon_switches
         )
 
+        melee_attempts.append(
+            current_melee_attempts
+        )
+
+        melee_hits.append(
+            current_melee_hits
+        )
+
+        health_pickups.append(
+            current_health_pickups
+        )
+
+        ammo_pickups.append(
+            current_ammo_pickups
+        )
+
+        enemies_defeated.append(
+            current_enemies_defeated
+        )
+
         # ----------------------------------------------------
         # SURVIVAL
         # ----------------------------------------------------
@@ -361,17 +426,17 @@ def main():
         # RESULT
         # ----------------------------------------------------
 
-        if env.player.health <= 0:
-
-            defeated_player_episodes += 1
-
-            result = "PLAYER DEFEATED"
-
-        elif env.bot.health <= 0:
+        if env.bot.health <= 0:
 
             defeated_bot_episodes += 1
 
             result = "BOT DEFEATED"
+
+        elif current_enemies_defeated >= 2:
+
+            defeated_player_episodes += 1
+
+            result = "ALL ENEMIES DEFEATED"
 
         else:
 
@@ -431,6 +496,26 @@ def main():
         np.mean(weapon_switches)
     )
 
+    average_melee_attempts = float(
+        np.mean(melee_attempts)
+    )
+
+    average_melee_hits = float(
+        np.mean(melee_hits)
+    )
+
+    average_health_pickups = float(
+        np.mean(health_pickups)
+    )
+
+    average_ammo_pickups = float(
+        np.mean(ammo_pickups)
+    )
+
+    average_enemies_defeated = float(
+        np.mean(enemies_defeated)
+    )
+
     total_shots = sum(
         shots_fired
     )
@@ -476,7 +561,7 @@ def main():
     print()
     print()
     print("=" * 65)
-    print("RL25 EVALUATION RESULTS")
+    print("DQN EVALUATION RESULTS")
     print("=" * 65)
 
     print()
@@ -521,6 +606,31 @@ def main():
         f"{average_weapon_switches:.2f}"
     )
 
+    print(
+        f"Average melee tries  : "
+        f"{average_melee_attempts:.2f}"
+    )
+
+    print(
+        f"Average melee hits   : "
+        f"{average_melee_hits:.2f}"
+    )
+
+    print(
+        f"Avg health pickups   : "
+        f"{average_health_pickups:.2f}"
+    )
+
+    print(
+        f"Avg ammo pickups     : "
+        f"{average_ammo_pickups:.2f}"
+    )
+
+    print(
+        f"Avg enemies defeated : "
+        f"{average_enemies_defeated:.2f} / 2"
+    )
+
     print()
 
     print(
@@ -529,12 +639,12 @@ def main():
     )
 
     print(
-        f"Player defeat rate   : "
+        f"All-enemies defeat rate: "
         f"{player_defeat_rate:.2f}%"
     )
 
     print(
-        f"Bot defeat rate      : "
+        f"Bot defeat rate        : "
         f"{bot_defeat_rate:.2f}%"
     )
 
@@ -619,6 +729,42 @@ def main():
 
         print(
             "WARNING: Average damage dealt is 0."
+        )
+
+    if sum(melee_hits) > 0:
+
+        print(
+            "Successful melee hits were recorded."
+        )
+
+    else:
+
+        print(
+            "No successful melee hits were recorded."
+        )
+
+    if sum(health_pickups) > 0:
+
+        print(
+            "Health pickup usage was recorded."
+        )
+
+    else:
+
+        print(
+            "No health pickups were collected."
+        )
+
+    if sum(ammo_pickups) > 0:
+
+        print(
+            "Ammo pickup usage was recorded."
+        )
+
+    else:
+
+        print(
+            "No ammo pickups were collected."
         )
 
     print()

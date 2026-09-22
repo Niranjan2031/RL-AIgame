@@ -39,10 +39,10 @@ from dqn_agent import DQNAgent
 
 
 # ============================================================
-# RL25 CONFIGURATION
+# FINAL CONFIGURATION
 # ============================================================
 
-STATE_SIZE = 28
+STATE_SIZE = 34
 ACTION_SIZE = 9
 
 LEARNING_RATE = 0.0005
@@ -52,9 +52,11 @@ EPSILON_START = 1.0
 EPSILON_MIN = 0.05
 
 # IMPORTANT:
-# Epsilon is now decayed ONCE PER EPISODE,
-# not once per environment step.
-EPSILON_DECAY = 0.98
+# Epsilon is decayed ONCE PER EPISODE.
+# A slower decay gives the agent enough episodes to
+# repeatedly explore the close-range MELEE action.
+# 0.995 reaches EPSILON_MIN after roughly 598 episodes.
+EPSILON_DECAY = 0.995
 
 BATCH_SIZE = 64
 
@@ -62,8 +64,8 @@ MEMORY_SIZE = 100000
 
 TARGET_UPDATE_FREQUENCY = 1000
 
-DEFAULT_MINUTES = 2
-DEFAULT_MAX_STEPS = 500000
+DEFAULT_MINUTES = 150
+DEFAULT_MAX_STEPS = 500000000
 
 CHECKPOINT_INTERVAL_MINUTES = 5
 
@@ -85,12 +87,12 @@ os.makedirs(
 
 FINAL_MODEL_PATH = os.path.join(
     MODELS_DIR,
-    "rl_bot_1_dqn_rl25_final.pt"
+    "rl_bot_1_dqn_final.pt"
 )
 
 BEST_MODEL_PATH = os.path.join(
     MODELS_DIR,
-    "rl_bot_1_dqn_rl25_best.pt"
+    "rl_bot_1_dqn_best.pt"
 )
 
 
@@ -118,7 +120,7 @@ ACTION_NAMES = {
 def parse_arguments():
 
     parser = argparse.ArgumentParser(
-        description="Train RL25 DQN for Tactical Shooter."
+        description="Train final 34-state DQN for Tactical Shooter."
     )
 
     parser.add_argument(
@@ -155,7 +157,7 @@ def checkpoint_path(minutes):
 
     return os.path.join(
         MODELS_DIR,
-        f"rl_bot_1_dqn_rl25_{minute_value:03d}min.pt"
+        f"rl_bot_1_dqn_{minute_value:03d}min.pt"
     )
 
 
@@ -170,7 +172,7 @@ def print_configuration(
 
     print()
     print("=" * 65)
-    print("RL25 DQN TRAINING")
+    print("FINAL DQN TRAINING")
     print("=" * 65)
 
     print(
@@ -235,11 +237,15 @@ def print_configuration(
     print()
 
     print(
-        "Weapon selection is automatic."
+        "Training opponents  : 2 scripted enemies"
     )
 
     print(
-        "RL weapon actions are NOT used."
+        "Enemy targeting     : enemy 1 active initially; enemy 2 activates at 75% trigger"
+    )
+
+    print(
+        "Weapon selection    : automatic; action 8 requests MELEE"
     )
 
     print("=" * 65)
@@ -377,6 +383,13 @@ def main():
 
     total_weapon_switches = 0
 
+    # Additional training statistics
+    total_melee_attempts = 0
+    total_melee_hits = 0
+    total_health_pickups = 0
+    total_ammo_pickups = 0
+    total_enemies_defeated = 0
+
     # ========================================================
     # RESET
     # ========================================================
@@ -402,6 +415,31 @@ def main():
 
     previous_weapon_switches = info.get(
         "weapon_switches",
+        0
+    )
+
+    previous_melee_attempts = info.get(
+        "melee_attempts",
+        0
+    )
+
+    previous_melee_hits = info.get(
+        "melee_hits",
+        0
+    )
+
+    previous_health_pickups = info.get(
+        "health_pickups_collected",
+        0
+    )
+
+    previous_ammo_pickups = info.get(
+        "ammo_pickups_collected",
+        0
+    )
+
+    previous_enemies_defeated = info.get(
+        "enemies_defeated",
         0
     )
 
@@ -523,6 +561,31 @@ def main():
                 0
             )
 
+            current_melee_attempts = info.get(
+                "melee_attempts",
+                0
+            )
+
+            current_melee_hits = info.get(
+                "melee_hits",
+                0
+            )
+
+            current_health_pickups = info.get(
+                "health_pickups_collected",
+                0
+            )
+
+            current_ammo_pickups = info.get(
+                "ammo_pickups_collected",
+                0
+            )
+
+            current_enemies_defeated = info.get(
+                "enemies_defeated",
+                0
+            )
+
             shot_delta = (
                 current_shots_fired
                 - previous_shots_fired
@@ -538,6 +601,31 @@ def main():
                 - previous_weapon_switches
             )
 
+            melee_attempt_delta = (
+                current_melee_attempts
+                - previous_melee_attempts
+            )
+
+            melee_hit_delta = (
+                current_melee_hits
+                - previous_melee_hits
+            )
+
+            health_pickup_delta = (
+                current_health_pickups
+                - previous_health_pickups
+            )
+
+            ammo_pickup_delta = (
+                current_ammo_pickups
+                - previous_ammo_pickups
+            )
+
+            enemy_defeat_delta = (
+                current_enemies_defeated
+                - previous_enemies_defeated
+            )
+
             # Safety against counter resets.
             if shot_delta < 0:
                 shot_delta = current_shots_fired
@@ -548,9 +636,29 @@ def main():
             if switch_delta < 0:
                 switch_delta = current_weapon_switches
 
+            if melee_attempt_delta < 0:
+                melee_attempt_delta = current_melee_attempts
+
+            if melee_hit_delta < 0:
+                melee_hit_delta = current_melee_hits
+
+            if health_pickup_delta < 0:
+                health_pickup_delta = current_health_pickups
+
+            if ammo_pickup_delta < 0:
+                ammo_pickup_delta = current_ammo_pickups
+
+            if enemy_defeat_delta < 0:
+                enemy_defeat_delta = current_enemies_defeated
+
             total_shots_fired += shot_delta
             total_shots_hit += hit_delta
             total_weapon_switches += switch_delta
+            total_melee_attempts += melee_attempt_delta
+            total_melee_hits += melee_hit_delta
+            total_health_pickups += health_pickup_delta
+            total_ammo_pickups += ammo_pickup_delta
+            total_enemies_defeated += enemy_defeat_delta
 
             previous_shots_fired = (
                 current_shots_fired
@@ -562,6 +670,26 @@ def main():
 
             previous_weapon_switches = (
                 current_weapon_switches
+            )
+
+            previous_melee_attempts = (
+                current_melee_attempts
+            )
+
+            previous_melee_hits = (
+                current_melee_hits
+            )
+
+            previous_health_pickups = (
+                current_health_pickups
+            )
+
+            previous_ammo_pickups = (
+                current_ammo_pickups
+            )
+
+            previous_enemies_defeated = (
+                current_enemies_defeated
             )
 
             # =================================================
@@ -681,6 +809,31 @@ def main():
 
                 previous_weapon_switches = info.get(
                     "weapon_switches",
+                    0
+                )
+
+                previous_melee_attempts = info.get(
+                    "melee_attempts",
+                    0
+                )
+
+                previous_melee_hits = info.get(
+                    "melee_hits",
+                    0
+                )
+
+                previous_health_pickups = info.get(
+                    "health_pickups_collected",
+                    0
+                )
+
+                previous_ammo_pickups = info.get(
+                    "ammo_pickups_collected",
+                    0
+                )
+
+                previous_enemies_defeated = info.get(
+                    "enemies_defeated",
                     0
                 )
 
@@ -845,6 +998,31 @@ def main():
     print(
         f"Weapon switches     : "
         f"{total_weapon_switches:,}"
+    )
+
+    print(
+        f"Melee attempts      : "
+        f"{total_melee_attempts:,}"
+    )
+
+    print(
+        f"Melee hits          : "
+        f"{total_melee_hits:,}"
+    )
+
+    print(
+        f"Health pickups      : "
+        f"{total_health_pickups:,}"
+    )
+
+    print(
+        f"Ammo pickups        : "
+        f"{total_ammo_pickups:,}"
+    )
+
+    print(
+        f"Enemies defeated    : "
+        f"{total_enemies_defeated:,}"
     )
 
     print()

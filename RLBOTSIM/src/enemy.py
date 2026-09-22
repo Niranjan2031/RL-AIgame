@@ -2514,15 +2514,51 @@ class Enemy:
         )
 
         if not moved:
+            # Even if movement fails, enforce the hard screen rule.
+            self.clamp_to_screen()
             # A new path will be requested on the next update.
             return
 
+        # Hard screen boundary. This rule is separate from
+        # Tiled-map navigation bounds.
+        self.clamp_to_screen()
 
         self.rect.topleft = (
             int(self.x),
             int(self.y)
         )
 
+
+
+    # =========================================================
+    # SCREEN BOUNDARY
+    # =========================================================
+    # Hard game rule: the complete enemy body must remain
+    # inside the visible Pygame screen.
+    # =========================================================
+
+    def clamp_to_screen(self, screen_width=1000, screen_height=700):
+
+        self.x = max(
+            0.0,
+            min(
+                float(self.x),
+                float(screen_width - self.width)
+            )
+        )
+
+        self.y = max(
+            0.0,
+            min(
+                float(self.y),
+                float(screen_height - self.height)
+            )
+        )
+
+        self.rect.topleft = (
+            int(self.x),
+            int(self.y)
+        )
 
     # =========================================================
     # DRAW
